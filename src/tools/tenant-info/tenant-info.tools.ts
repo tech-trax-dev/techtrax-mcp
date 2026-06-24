@@ -3,12 +3,20 @@ import { Tool } from '@rekog/mcp-nest';
 import { z } from 'zod';
 import { BackendHttpService } from '../../common/backend/backend-http.service';
 import { BackendException } from '../../common/errors/backend.exception';
-import {
-  errorResult,
-  jsonResult,
-  textResult,
-} from '../../common/mcp/tool-response.util';
+import { errorResult } from '../../common/mcp/tool-response.util';
 import type { McpToolResult } from '../../common/mcp/tool-response.util';
+import {
+  ClinicProfileOutputSchema,
+  DoctorAvailabilityOutputSchema,
+  DoctorProfileOutputSchema,
+  DoctorsListOutputSchema,
+} from '../../contracts/tenant-info.schemas';
+import type {
+  ClinicProfileOutput,
+  DoctorAvailabilityOutput,
+  DoctorProfileOutput,
+  DoctorsListOutput,
+} from '../../contracts/tenant-info.schemas';
 
 type OutputFormat = 'json' | 'markdown';
 
@@ -18,83 +26,6 @@ type ToolRequest = {
     tenantId?: string;
     tenant?: { id?: string };
   };
-};
-
-type ClinicOperatingHour = {
-  day: string;
-  openTime: string | null;
-  closeTime: string | null;
-  isWorkingDay: boolean;
-};
-
-type ClinicProfile = {
-  name: string;
-  description: string | null;
-  logoUrl: string | null;
-  primaryPhone: string | null;
-  secondaryPhone: string | null;
-  email: string | null;
-  address: string | null;
-  specialties: string[];
-  timezone: string;
-  operatingHours: ClinicOperatingHour[];
-  currentStatus: 'open_now' | 'closed_now' | 'closed_today';
-};
-
-type DoctorListItem = {
-  id: string;
-  fullName: string;
-  specialty: string | null;
-  bio: string | null;
-  presenceStatus: 'present' | 'absent';
-  supportsOnline: boolean;
-  supportsOffline: boolean;
-};
-
-type DoctorsListResponse = {
-  doctors: DoctorListItem[];
-  pagination: {
-    page: number;
-    limit: number;
-    total_count: number;
-    has_more: boolean;
-    next_offset: number | null;
-  };
-};
-
-type DoctorProfile = {
-  firstName: string;
-  lastName: string;
-  email: string | null;
-  phone: string | null;
-  specialty: string | null;
-  bio: string | null;
-  education: {
-    university: string | null;
-    faculty: string | null;
-    major: string | null;
-    graduationYear: number | null;
-    degree: string | null;
-    level: string | null;
-  };
-  certifications: Array<{
-    certificationName: string | null;
-    year: number | null;
-  }>;
-  experience: '0-2' | '3-5' | '6-8' | '9-10' | '10+' | null;
-};
-
-type DoctorAvailability = {
-  available: boolean;
-  reason: 'absent' | 'no_shift_today' | null;
-  availableOnline: boolean;
-  availableOffline: boolean;
-  schedule: Array<{
-    day: string;
-    startTime: string | null;
-    endTime: string | null;
-    mode: 'online' | 'offline' | 'both';
-  }>;
 };
 
 const formatSchema = z.enum(['json', 'markdown']).default('json');
@@ -117,6 +48,7 @@ export class TenantInfoTools {
     parameters: z.object({
       format: formatSchema.optional(),
     }),
+    outputSchema: ClinicProfileOutputSchema,
     annotations: TOOL_ANNOTATIONS,
   })
   async getClinicProfile(
@@ -134,7 +66,7 @@ export class TenantInfoTools {
     }
 
     try {
-      const data = await this.getWithTenantHeader<ClinicProfile>(
+      const data = await this.getWithTenantHeader<ClinicProfileOutput>(
         tenantId,
         '/api/v1/mcp/tenant-info/clinic-profile',
       );
@@ -154,17 +86,23 @@ export class TenantInfoTools {
   @Tool({
     name: 'tenant_info.list_doctors',
     description:
-      "Lists and filters doctors in the clinic. Returns per doctor: id, fullName, specialty, bio, presenceStatus (present = currently clocked in / accepting; absent = not), supportsOnline, supportsOffline. Use this to answer 'which doctors' questions (directory, by name, by specialty, by online/offline support, by presence). For one specific doctor's bookable availability use tenant_info.get_doctor_availability; for credentials use tenant_info.get_doctor_profile. Results are paginated: read pagination.has_more and, when true, request the next page using pagination.next_offset (or increment page).",
+      "Lists and filters doctors in the clinic. Returns per doctor: id, fullName, specialty, bio, presenceStatus (present = currently clocked in / accepting; absent = not), supportsOnline, supportsOffline. Use this to answer 'which doctors' questions (directory, by name, by specialty, by online/offline support, by presence). For one specific doctor's bookable availability use tenant_info.get_doctor_availability; for credentials use tenant_info.get_doctor_profile. Results are paginated: read pagination.has_more. To paginate, pass `next_page` from the previous response as the `page` param in your next call. When `has_more` is false, you have reached the last page. An empty doctors array is a valid result (the clinic has no doctors matching the filters), not an error.",
     parameters: z.object({
       name: z.string().min(1).optional(),
       specialty: z.string().min(1).optional(),
       supportsOnline: z.boolean().optional(),
       supportsOffline: z.boolean().optional(),
-      presenceStatus: z.enum(['present', 'absent']).optional(),
+      presenceStatus: z
+        .enum(['present', 'absent'])
+        .optional()
+        .describe(
+          "Filter by doctor presence. 'present' = clocked in today. 'absent' = not clocked in.",
+        ),
       page: z.number().int().positive().optional(),
       limit: z.number().int().positive().max(50).optional(),
       format: formatSchema.optional(),
     }),
+    outputSchema: DoctorsListOutputSchema,
     annotations: TOOL_ANNOTATIONS,
   })
   async listDoctors(
@@ -190,7 +128,7 @@ export class TenantInfoTools {
     }
 
     try {
-      const data = await this.getWithTenantHeader<DoctorsListResponse>(
+      const data = await this.getWithTenantHeader<DoctorsListOutput>(
         tenantId,
         '/api/v1/mcp/tenant-info/doctors',
         {
@@ -206,12 +144,8 @@ export class TenantInfoTools {
         },
       );
 
-      if (!data?.doctors?.length) {
-        return errorResult(
-          'No doctors found. Try removing filters or checking the specialty name.',
-        );
-      }
-
+      // An empty `doctors` array is a valid success (no matching doctors),
+      // not a failure. Only backend HTTP errors are surfaced as isError.
       return this.formatResult(data, format, (payload) =>
         this.renderDoctorsMarkdown(payload),
       );
@@ -228,6 +162,7 @@ export class TenantInfoTools {
       doctorId: z.string().min(1),
       format: formatSchema.optional(),
     }),
+    outputSchema: DoctorProfileOutputSchema,
     annotations: TOOL_ANNOTATIONS,
   })
   async getDoctorProfile(
@@ -244,7 +179,7 @@ export class TenantInfoTools {
     }
 
     try {
-      const data = await this.getWithTenantHeader<DoctorProfile>(
+      const data = await this.getWithTenantHeader<DoctorProfileOutput>(
         tenantId,
         `/api/v1/mcp/tenant-info/doctors/${encodeURIComponent(args.doctorId)}`,
       );
@@ -271,6 +206,7 @@ export class TenantInfoTools {
       doctorId: z.string().min(1),
       format: formatSchema.optional(),
     }),
+    outputSchema: DoctorAvailabilityOutputSchema,
     annotations: TOOL_ANNOTATIONS,
   })
   async getDoctorAvailability(
@@ -287,7 +223,7 @@ export class TenantInfoTools {
     }
 
     try {
-      const data = await this.getWithTenantHeader<DoctorAvailability>(
+      const data = await this.getWithTenantHeader<DoctorAvailabilityOutput>(
         tenantId,
         `/api/v1/mcp/tenant-info/doctors/${encodeURIComponent(args.doctorId)}/availability`,
       );
@@ -339,13 +275,19 @@ export class TenantInfoTools {
     format: OutputFormat,
     markdownFormatter: (payload: T) => string,
   ): McpToolResult {
-    if (format === 'markdown') {
-      return textResult(markdownFormatter(data));
-    }
-    return jsonResult(data);
+    // Always include structuredContent so clients with the tool's outputSchema
+    // get typed data, regardless of whether the text block is JSON or markdown.
+    const text =
+      format === 'markdown'
+        ? markdownFormatter(data)
+        : JSON.stringify(data, null, 2);
+    return {
+      content: [{ type: 'text', text }],
+      structuredContent: data,
+    };
   }
 
-  private renderClinicProfileMarkdown(data: ClinicProfile): string {
+  private renderClinicProfileMarkdown(data: ClinicProfileOutput): string {
     const specialties =
       data.specialties.length > 0
         ? data.specialties.map((s) => `- ${s}`).join('\n')
@@ -385,7 +327,7 @@ export class TenantInfoTools {
     ].join('\n');
   }
 
-  private renderDoctorsMarkdown(data: DoctorsListResponse): string {
+  private renderDoctorsMarkdown(data: DoctorsListOutput): string {
     const doctorsLines = data.doctors.map((doctor) => {
       const modes =
         doctor.supportsOnline && doctor.supportsOffline
@@ -409,11 +351,11 @@ export class TenantInfoTools {
       `- limit: ${data.pagination.limit}`,
       `- total_count: ${data.pagination.total_count}`,
       `- has_more: ${data.pagination.has_more}`,
-      `- next_offset: ${data.pagination.next_offset ?? 'null'}`,
+      `- next_page: ${data.pagination.next_page ?? 'null'}`,
     ].join('\n');
   }
 
-  private renderDoctorProfileMarkdown(data: DoctorProfile): string {
+  private renderDoctorProfileMarkdown(data: DoctorProfileOutput): string {
     const certifications =
       data.certifications.length > 0
         ? data.certifications
@@ -448,7 +390,9 @@ export class TenantInfoTools {
     ].join('\n');
   }
 
-  private renderDoctorAvailabilityMarkdown(data: DoctorAvailability): string {
+  private renderDoctorAvailabilityMarkdown(
+    data: DoctorAvailabilityOutput,
+  ): string {
     const schedule =
       data.schedule.length > 0
         ? data.schedule

@@ -11,6 +11,11 @@ export interface McpTextContent {
 
 export interface McpToolResult {
   content: McpTextContent[];
+  /**
+   * Typed payload mirroring the tool's `outputSchema`. Present on successful
+   * results so MCP clients get structured data alongside the text block.
+   */
+  structuredContent?: unknown;
   isError?: boolean;
 }
 
