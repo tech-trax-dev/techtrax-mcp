@@ -4,7 +4,7 @@ export const envSchema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
     .default('development'),
-  PORT: z.coerce.number().default(3000),
+  PORT: z.coerce.number().default(3100),
   // Outbound: MCP -> Express
   BACKEND_BASE_URL: z.url(),
   BACKEND_API_KEY: z.string().min(1),

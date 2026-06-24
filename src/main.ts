@@ -10,7 +10,7 @@ async function bootstrap() {
   // Graceful shutdown: drain in-flight requests / close transports on SIGTERM.
   app.enableShutdownHooks();
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT ?? 3100;
   await app.listen(port);
 
   app
