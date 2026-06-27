@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/mcp-wordmark.png" alt="TechTrax MCP Server" width="360" />
+</p>
+
 # TechTrax MCP Server
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes
@@ -81,6 +85,10 @@ Each namespace is a self-contained module under [`src/tools/`](src/tools/):
 
 Adding a namespace = new folder + module + one import line in
 [`tools.module.ts`](src/tools/tools.module.ts). No infra changes.
+
+👉 **Adding or extending a tool?** Follow the step-by-step guide with conventions,
+a full worked example, and a pre-merge checklist:
+**[docs/ADDING_A_TOOL.md](docs/ADDING_A_TOOL.md)**.
 
 ## Deployment
 
