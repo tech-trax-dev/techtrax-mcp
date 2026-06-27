@@ -9,11 +9,14 @@ TechTrax backend capabilities (tenant info, appointments, statistics, health) as
 MCP **tools** to AI clients. Built on [NestJS](https://nestjs.com) +
 [`@rekog/mcp-nest`](https://www.npmjs.com/package/@rekog/mcp-nest).
 
-```
-┌────────────┐   MCP / streamable-HTTP    ┌──────────────┐   HTTP + x-internal-api-key   ┌────────────────────┐
-│ AI client  │ ─────────────────────────▶ │  MCP server  │ ────────────────────────────▶ │ TechTrax Express   │
-│ (Claude…)  │   POST /mcp  x-api-key     │  (this repo) │   /tenant, /appointments…     │ backend API        │
-└────────────┘                            └──────────────┘                               └────────────────────┘
+```mermaid
+flowchart LR
+    client["AI client<br/>(Claude, etc.)"]
+    mcp["MCP server<br/>(this repo)"]
+    backend["TechTrax Express<br/>backend API"]
+
+    client -->|"POST /mcp<br/>x-api-key"| mcp
+    mcp -->|"HTTP + x-internal-api-key<br/>/tenant, /appointments, …"| backend
 ```
 
 - **Transport:** streamable HTTP only, stateful sessions. Endpoint: `POST /mcp`.

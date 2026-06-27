@@ -12,9 +12,14 @@ already used by `health`, `tenant-info`, `appointment`, and `statistics`.
 
 ## 1. Mental model
 
-```
-AI client ──POST /mcp──▶  @Tool method  ──BackendHttpService──▶  Express backend
-            x-api-key       (this repo)      x-internal-api-key      /api/v1/mcp/...
+```mermaid
+flowchart LR
+    client["AI client"]
+    tool["@Tool method<br/>(this repo)"]
+    backend["Express backend<br/>/api/v1/mcp/…"]
+
+    client -->|"POST /mcp · x-api-key"| tool
+    tool -->|"BackendHttpService<br/>x-internal-api-key"| backend
 ```
 
 A tool is a thin adapter. Its only job:
