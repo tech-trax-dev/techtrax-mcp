@@ -1,0 +1,9 @@
+# Normalize line endings to LF in the repo so prettier/CI behave identically on
+# Windows, macOS, and Linux. Without this, Windows CRLF checkouts fail lint.
+* text=auto eol=lf
+
+# Keep lockfiles and binaries untouched
+package-lock.json -text
+*.png binary
+*.jpg binary
+*.ico binary

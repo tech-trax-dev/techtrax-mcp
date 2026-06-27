@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { McpModule, McpTransportType } from '@rekog/mcp-nest';
 import { LoggerModule } from 'nestjs-pino';
 import { BackendModule } from './common/backend/backend.module';
+import { McpClientGuard } from './common/mcp/mcp-client.guard';
 import { Env } from './config/config.types';
 import { validateEnv } from './config/env.validation';
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from './config/mcp.constants';
@@ -52,12 +53,16 @@ import { ToolsModule } from './tools/tools.module';
         sessionIdGenerator: () => randomUUID(),
         statelessMode: false,
       },
-      // guards: [McpClientGuard], // enable once MCP_CLIENT_API_KEY is set
+      // Inbound auth. The guard is a no-op when MCP_CLIENT_API_KEY is unset
+      // (local/dev); it enforces `x-api-key` once the key is configured, and
+      // env validation makes the key mandatory in production.
+      guards: [McpClientGuard],
     }),
 
     BackendModule,
     ToolsModule,
   ],
   controllers: [HealthController],
+  providers: [McpClientGuard],
 })
 export class AppModule {}

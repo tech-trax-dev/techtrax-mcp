@@ -35,7 +35,10 @@ export const AppointmentSummaryOutputSchema = z.object({
   visitTypeMix: z.object({ exam: CountPct, followUp: CountPct }),
   sessionTypeMix: z.object({ online: CountPct, inClinic: CountPct }),
   walkInVsScheduled: z.object({ walkIn: CountPct, scheduled: CountPct }),
-  firstVisitVsReturning: z.object({ firstVisit: CountPct, returning: CountPct }),
+  firstVisitVsReturning: z.object({
+    firstVisit: CountPct,
+    returning: CountPct,
+  }),
   billableShare: CountPct,
   avgPerDay: z.number(),
   dailyOverview: z.array(
@@ -142,7 +145,11 @@ export const FinancialSummaryOutputSchema = z.object({
     z.object({ method: z.string(), total: z.number(), count: z.number() }),
   ),
   byService: z.array(
-    z.object({ service: z.string().nullable(), revenue: z.number(), count: z.number() }),
+    z.object({
+      service: z.string().nullable(),
+      revenue: z.number(),
+      count: z.number(),
+    }),
   ),
 });
 
@@ -190,11 +197,21 @@ export const GrowthTrendsOutputSchema = z.object({
   revenue: GrowthMetric,
 });
 
-export type AppointmentSummaryOutput = z.infer<typeof AppointmentSummaryOutputSchema>;
-export type CancellationStatsOutput = z.infer<typeof CancellationStatsOutputSchema>;
+export type AppointmentSummaryOutput = z.infer<
+  typeof AppointmentSummaryOutputSchema
+>;
+export type CancellationStatsOutput = z.infer<
+  typeof CancellationStatsOutputSchema
+>;
 export type PatientSummaryOutput = z.infer<typeof PatientSummaryOutputSchema>;
-export type DoctorPerformanceOutput = z.infer<typeof DoctorPerformanceOutputSchema>;
-export type FinancialSummaryOutput = z.infer<typeof FinancialSummaryOutputSchema>;
-export type OperationalStatsOutput = z.infer<typeof OperationalStatsOutputSchema>;
+export type DoctorPerformanceOutput = z.infer<
+  typeof DoctorPerformanceOutputSchema
+>;
+export type FinancialSummaryOutput = z.infer<
+  typeof FinancialSummaryOutputSchema
+>;
+export type OperationalStatsOutput = z.infer<
+  typeof OperationalStatsOutputSchema
+>;
 export type ServiceStatsOutput = z.infer<typeof ServiceStatsOutputSchema>;
 export type GrowthTrendsOutput = z.infer<typeof GrowthTrendsOutputSchema>;

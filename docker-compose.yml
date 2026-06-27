@@ -1,0 +1,39 @@
+# Local / single-host deployment of the TechTrax MCP server.
+# Production secrets come from an env file the DevOps team provides (NOT committed).
+#
+#   cp .env.production.example .env.production   # then fill in real values
+#   docker compose up -d --build
+#
+# NOTE on scaling: the streamable-HTTP transport keeps session state in memory.
+# Run a SINGLE replica, or put sticky sessions (session affinity) in front of
+# multiple replicas. Plain round-robin load balancing will break MCP sessions.
+
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: techtrax/mcp-server:latest
+    container_name: techtrax-mcp-server
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    ports:
+      - "${PORT:-3100}:3100"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get('http://127.0.0.1:'+(process.env.PORT||3100)+'/healthz/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # If the TechTrax backend also runs in compose, share its network and set
+    # BACKEND_BASE_URL=http://<backend-service>:<port> in .env.production.
+    # networks:
+    #   - techtrax
+# networks:
+#   techtrax:
+#     external: true

@@ -88,7 +88,12 @@ const growthTrends = {
     trend: 'up',
   },
   newPatients: { current: 5, previous: 8, changePercent: -37.5, trend: 'down' },
-  revenue: { current: 5400, previous: 5400, changePercent: 0, trend: 'neutral' },
+  revenue: {
+    current: 5400,
+    previous: 5400,
+    changePercent: 0,
+    trend: 'neutral',
+  },
 };
 
 describe('StatisticsTools', () => {

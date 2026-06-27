@@ -1,98 +1,88 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# TechTrax MCP Server
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes
+TechTrax backend capabilities (tenant info, appointments, statistics, health) as
+MCP **tools** to AI clients. Built on [NestJS](https://nestjs.com) +
+[`@rekog/mcp-nest`](https://www.npmjs.com/package/@rekog/mcp-nest).
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
-
-## Description
-
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Project setup
-
-```bash
-$ npm install
+```
+┌────────────┐   MCP / streamable-HTTP    ┌──────────────┐   HTTP + x-internal-api-key   ┌────────────────────┐
+│ AI client  │ ─────────────────────────▶ │  MCP server  │ ────────────────────────────▶ │ TechTrax Express   │
+│ (Claude…)  │   POST /mcp  x-api-key     │  (this repo) │   /tenant, /appointments…     │ backend API        │
+└────────────┘                            └──────────────┘                               └────────────────────┘
 ```
 
-## Compile and run the project
+- **Transport:** streamable HTTP only, stateful sessions. Endpoint: `POST /mcp`.
+- **Inbound auth:** `x-api-key` header validated against `MCP_CLIENT_API_KEY`
+  (required in production).
+- **Outbound auth:** every backend call carries `x-internal-api-key`
+  (`BACKEND_API_KEY`).
+- **Probes:** `GET /healthz` (liveness), `GET /healthz/ready` (readiness — checks
+  the backend).
+
+## Quick start (local)
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+nvm use            # Node 24 (see .nvmrc)
+npm ci
+cp .env.example .env   # adjust BACKEND_BASE_URL / BACKEND_API_KEY
+npm run start:dev
 ```
 
-## Run tests
+Server logs `…listening on http://0.0.0.0:3100/mcp`. Explore it with the MCP
+Inspector:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npx @modelcontextprotocol/inspector
+# connect to http://localhost:3100/mcp (transport: Streamable HTTP)
 ```
+
+## Configuration
+
+All config is via environment variables, validated at boot
+([`src/config/env.validation.ts`](src/config/env.validation.ts)). The process
+**refuses to start** on invalid/missing values.
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `NODE_ENV` | no | `development` | `development` \| `test` \| `production` |
+| `HOST` | no | `0.0.0.0` | Bind address (keep `0.0.0.0` in containers) |
+| `PORT` | no | `3100` | HTTP listen port |
+| `BACKEND_BASE_URL` | **yes** | — | TechTrax Express base URL |
+| `BACKEND_API_KEY` | **yes** | — | Internal secret sent as `x-internal-api-key` |
+| `BACKEND_TIMEOUT_MS` | no | `15000` | Outbound request timeout |
+| `MCP_SERVER_NAME` | no | `techtrax-mcp` | Server name advertised to clients |
+| `MCP_SERVER_VERSION` | no | `1.0.0` | Server version advertised to clients |
+| `MCP_CLIENT_API_KEY` | **prod only** | — | Inbound `x-api-key`; required when `NODE_ENV=production` |
+| `CORS_ALLOWED_ORIGINS` | no | — | Comma-separated browser origins; empty = CORS off |
+| `TRUST_PROXY` | no | `false` | Set `true` behind a proxy/LB/ingress |
+| `LOG_LEVEL` | no | `info` | `fatal`…`trace` |
+
+## Scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm run start:dev` | Watch mode (pretty logs) |
+| `npm run build` | Compile to `dist/` |
+| `npm run start:prod` | Run compiled build (`node dist/main`) |
+| `npm test` | Unit tests |
+| `npm run lint` / `lint:ci` | Lint (autofix / check-only) |
+
+## Tools
+
+Each namespace is a self-contained module under [`src/tools/`](src/tools/):
+
+| Namespace | Example tools |
+| --- | --- |
+| `health` | `health.ping`, `health.backend` |
+| `tenant-info` | tenant lookup |
+| `appointment` | appointment queries |
+| `statistics` | reporting/statistics |
+
+Adding a namespace = new folder + module + one import line in
+[`tools.module.ts`](src/tools/tools.module.ts). No infra changes.
 
 ## Deployment
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the DevOps runbook (Docker, compose,
+k8s probes, scaling, secrets).
