@@ -6,6 +6,12 @@ import { BackendException } from '../../common/errors/backend.exception';
 import { errorResult } from '../../common/mcp/tool-response.util';
 import type { McpToolResult } from '../../common/mcp/tool-response.util';
 import {
+  resolveTenantId,
+  missingTenant,
+  tenantIdParam,
+} from '../../common/mcp/tenant.util';
+import type { ToolRequest } from '../../common/mcp/tenant.util';
+import {
   ClinicProfileOutputSchema,
   DoctorAvailabilityOutputSchema,
   DoctorProfileOutputSchema,
@@ -19,14 +25,6 @@ import type {
 } from '../../contracts/tenant-info.schemas';
 
 type OutputFormat = 'json' | 'markdown';
-
-type ToolRequest = {
-  headers?: Record<string, string | string[] | undefined>;
-  user?: {
-    tenantId?: string;
-    tenant?: { id?: string };
-  };
-};
 
 const formatSchema = z.enum(['json', 'markdown']).default('json');
 
@@ -46,23 +44,22 @@ export class TenantInfoTools {
     description:
       "Returns the clinic's identity and operating info: name, description, logo URL, phone numbers, email, address, list of medical specialties, timezone, weekly operating hours, and a live currentStatus. currentStatus is one of open_now (within today's hours), closed_now (a working day but outside hours), or closed_today (not a working day). Use this for any question about the clinic itself — location, contact, services, hours, or whether it is open right now. Do NOT use it for doctor-specific questions.",
     parameters: z.object({
+      tenantId: tenantIdParam,
       format: formatSchema.optional(),
     }),
     outputSchema: ClinicProfileOutputSchema,
     annotations: TOOL_ANNOTATIONS,
   })
   async getClinicProfile(
-    args: { format?: OutputFormat },
+    args: { tenantId?: string; format?: OutputFormat },
     // Context is currently unused but kept in signature for parity with MCP handler contract.
     _context: unknown,
     request?: ToolRequest,
   ): Promise<McpToolResult> {
     const format = args.format ?? 'json';
-    const tenantId = this.resolveTenantId(request);
+    const tenantId = resolveTenantId(request, args);
     if (!tenantId) {
-      return errorResult(
-        'Tenant context is missing. Please authenticate with a tenant-scoped client.',
-      );
+      return missingTenant();
     }
 
     try {
@@ -88,6 +85,7 @@ export class TenantInfoTools {
     description:
       "Lists and filters doctors in the clinic. Returns per doctor: id, fullName, specialty, bio, presenceStatus (present = currently clocked in / accepting; absent = not), supportsOnline, supportsOffline. Use this to answer 'which doctors' questions (directory, by name, by specialty, by online/offline support, by presence). For one specific doctor's bookable availability use tenant_info.get_doctor_availability; for credentials use tenant_info.get_doctor_profile. Results are paginated: read pagination.has_more. To paginate, pass `next_page` from the previous response as the `page` param in your next call. When `has_more` is false, you have reached the last page. An empty doctors array is a valid result (the clinic has no doctors matching the filters), not an error.",
     parameters: z.object({
+      tenantId: tenantIdParam,
       name: z.string().min(1).optional(),
       specialty: z.string().min(1).optional(),
       supportsOnline: z.boolean().optional(),
@@ -107,6 +105,7 @@ export class TenantInfoTools {
   })
   async listDoctors(
     args: {
+      tenantId?: string;
       name?: string;
       specialty?: string;
       supportsOnline?: boolean;
@@ -120,11 +119,9 @@ export class TenantInfoTools {
     request?: ToolRequest,
   ): Promise<McpToolResult> {
     const format = args.format ?? 'json';
-    const tenantId = this.resolveTenantId(request);
+    const tenantId = resolveTenantId(request, args);
     if (!tenantId) {
-      return errorResult(
-        'Tenant context is missing. Please authenticate with a tenant-scoped client.',
-      );
+      return missingTenant();
     }
 
     try {
@@ -159,6 +156,7 @@ export class TenantInfoTools {
     description:
       "Returns one doctor's STATIC professional profile: name, email, phone, specialty, bio, education (university/faculty/major/graduationYear/degree/level), certifications (certificationName + year), and experience range (0-2,3-5,6-8,9-10,10+). Use for 'who is this doctor / background / credentials' questions. Does NOT include schedule or availability — use tenant_info.get_doctor_availability for that.",
     parameters: z.object({
+      tenantId: tenantIdParam,
       doctorId: z.string().min(1),
       format: formatSchema.optional(),
     }),
@@ -166,16 +164,14 @@ export class TenantInfoTools {
     annotations: TOOL_ANNOTATIONS,
   })
   async getDoctorProfile(
-    args: { doctorId: string; format?: OutputFormat },
+    args: { tenantId?: string; doctorId: string; format?: OutputFormat },
     _context: unknown,
     request?: ToolRequest,
   ): Promise<McpToolResult> {
     const format = args.format ?? 'json';
-    const tenantId = this.resolveTenantId(request);
+    const tenantId = resolveTenantId(request, args);
     if (!tenantId) {
-      return errorResult(
-        'Tenant context is missing. Please authenticate with a tenant-scoped client.',
-      );
+      return missingTenant();
     }
 
     try {
@@ -203,6 +199,7 @@ export class TenantInfoTools {
     description:
       "Returns whether a doctor can be booked TODAY and their weekly schedule. Fields: available (bool); reason (absent = doctor not clocked in; no_shift_today = no working shift for today's weekday; null when available); availableOnline/availableOffline (consultation modes the doctor supports overall); schedule[] of {day,startTime,endTime,mode} where mode is online, offline, or both. Use for 'is Dr X available today / when does Dr X work / online or clinic day' questions. Advisory note: this reflects schedule + presence only; it does NOT count appointment slots, so it cannot confirm an exact bookable time — the booking flow is the source of truth.",
     parameters: z.object({
+      tenantId: tenantIdParam,
       doctorId: z.string().min(1),
       format: formatSchema.optional(),
     }),
@@ -210,16 +207,14 @@ export class TenantInfoTools {
     annotations: TOOL_ANNOTATIONS,
   })
   async getDoctorAvailability(
-    args: { doctorId: string; format?: OutputFormat },
+    args: { tenantId?: string; doctorId: string; format?: OutputFormat },
     _context: unknown,
     request?: ToolRequest,
   ): Promise<McpToolResult> {
     const format = args.format ?? 'json';
-    const tenantId = this.resolveTenantId(request);
+    const tenantId = resolveTenantId(request, args);
     if (!tenantId) {
-      return errorResult(
-        'Tenant context is missing. Please authenticate with a tenant-scoped client.',
-      );
+      return missingTenant();
     }
 
     try {
@@ -240,19 +235,6 @@ export class TenantInfoTools {
         `Failed to fetch doctor availability: ${(e as Error).message}`,
       );
     }
-  }
-
-  private resolveTenantId(request?: ToolRequest): string | null {
-    const fromUser = request?.user?.tenantId ?? request?.user?.tenant?.id;
-    if (fromUser) return fromUser;
-
-    const headerValue = request?.headers?.['x-tenant-id'];
-    if (typeof headerValue === 'string' && headerValue.trim())
-      return headerValue.trim();
-    if (Array.isArray(headerValue) && headerValue[0]?.trim())
-      return headerValue[0].trim();
-
-    return null;
   }
 
   private async getWithTenantHeader<T>(

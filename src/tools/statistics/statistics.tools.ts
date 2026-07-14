@@ -5,6 +5,12 @@ import { BackendHttpService } from '../../common/backend/backend-http.service';
 import { errorResult } from '../../common/mcp/tool-response.util';
 import type { McpToolResult } from '../../common/mcp/tool-response.util';
 import {
+  resolveTenantId,
+  missingTenant,
+  tenantIdParam,
+} from '../../common/mcp/tenant.util';
+import type { ToolRequest } from '../../common/mcp/tenant.util';
+import {
   AppointmentSummaryOutputSchema,
   CancellationStatsOutputSchema,
   PatientSummaryOutputSchema,
@@ -27,15 +33,8 @@ import type {
 
 type OutputFormat = 'json' | 'markdown';
 
-type ToolRequest = {
-  headers?: Record<string, string | string[] | undefined>;
-  user?: {
-    tenantId?: string;
-    tenant?: { id?: string };
-  };
-};
-
 type RangeArgs = {
+  tenantId?: string;
   from?: string;
   to?: string;
   timezone?: string;
@@ -47,6 +46,7 @@ const formatSchema = z.enum(['json', 'markdown']).default('json');
 // Every statistics tool shares the same period filter. Dates are calendar days
 // (YYYY-MM-DD); the backend defaults to the last 7 days when both are omitted.
 const rangeParams = {
+  tenantId: tenantIdParam,
   from: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'from must be YYYY-MM-DD')
@@ -264,8 +264,8 @@ export class StatisticsTools {
     markdownFormatter: (payload: T) => string,
   ): Promise<McpToolResult> {
     const format = args.format ?? 'json';
-    const tenantId = this.resolveTenantId(request);
-    if (!tenantId) return this.missingTenant();
+    const tenantId = resolveTenantId(request, args);
+    if (!tenantId) return missingTenant();
 
     try {
       const data = await this.getWithTenantHeader<T>(tenantId, url, {
@@ -278,25 +278,6 @@ export class StatisticsTools {
   }
 
   // ======================== Helpers ========================
-
-  private resolveTenantId(request?: ToolRequest): string | null {
-    const fromUser = request?.user?.tenantId ?? request?.user?.tenant?.id;
-    if (fromUser) return fromUser;
-
-    const headerValue = request?.headers?.['x-tenant-id'];
-    if (typeof headerValue === 'string' && headerValue.trim())
-      return headerValue.trim();
-    if (Array.isArray(headerValue) && headerValue[0]?.trim())
-      return headerValue[0].trim();
-
-    return null;
-  }
-
-  private missingTenant(): McpToolResult {
-    return errorResult(
-      'Tenant context is missing. Please authenticate with a tenant-scoped client.',
-    );
-  }
 
   private getWithTenantHeader<T>(
     tenantId: string,

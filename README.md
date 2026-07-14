@@ -93,6 +93,26 @@ Adding a namespace = new folder + module + one import line in
 a full worked example, and a pre-merge checklist:
 **[docs/ADDING_A_TOOL.md](docs/ADDING_A_TOOL.md)**.
 
+## Testing
+
+Run the unit suite with `npm test`.
+
+To exercise the server by hand (Postman, curl, or the MCP Inspector), follow
+**[docs/MANUAL_TESTING.md](docs/MANUAL_TESTING.md)** — it walks through the session
+handshake and passing `tenantId` as a tool argument.
+
+Ready-to-import Postman collection:
+**[docs/techtrax-mcp.postman_collection.json](docs/techtrax-mcp.postman_collection.json)**
+(auto-captures the MCP session id; set `baseUrl` / `tenantId` in the collection
+variables).
+
+Integrating an AI agent runtime with the server? See
+**[docs/AI_AGENT_INTEGRATION_GUIDE.md](docs/AI_AGENT_INTEGRATION_GUIDE.md)**.
+
+📌 **Existing integrator?** The tenant is now passed as a **`tenantId` tool
+argument** (the `x-tenant-id` header still works). One-page change notice:
+**[docs/TENANT_ID_MIGRATION.md](docs/TENANT_ID_MIGRATION.md)**.
+
 ## Deployment
 
 See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the DevOps runbook (Docker, compose,

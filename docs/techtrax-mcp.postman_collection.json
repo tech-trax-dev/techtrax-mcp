@@ -1,0 +1,223 @@
+{
+  "info": {
+    "name": "TechTrax MCP",
+    "description": "Manual testing for the TechTrax MCP server (Streamable HTTP, stateful).\n\nFlow: run the requests top to bottom.\n1. `initialize` captures the `Mcp-Session-Id` header into the `sessionId` collection variable (see its Tests tab).\n2. `notifications/initialized` completes the handshake.\n3. `tools/list` shows the catalog — confirm every tool now has a `tenantId` param.\n4. `tools/call` requests pass `tenantId` in `arguments`.\n\nEdit collection variables (baseUrl, tenantId, apiKey) under the collection's Variables tab.\n\nNote: responses come back as SSE (`text/event-stream`) by default. The body shows a `data: {...}` line. To get plain JSON instead, set `enableJsonResponse: true` in `src/app.module.ts` (dev only).\n\nSee docs/MANUAL_TESTING.md for the full guide.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3100",
+      "type": "string"
+    },
+    {
+      "key": "tenantId",
+      "value": "6650f1a2b3c4d5e6f7a8b9c0",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sessionId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. initialize",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Capture the MCP session id so later requests can reuse the session.",
+              "const sid = pm.response.headers.get('mcp-session-id');",
+              "if (sid) {",
+              "  pm.collectionVariables.set('sessionId', sid);",
+              "  console.log('Captured Mcp-Session-Id:', sid);",
+              "} else {",
+              "  console.warn('No Mcp-Session-Id header on the initialize response.');",
+              "}",
+              "pm.test('initialize returned a session id', function () {",
+              "  pm.expect(sid, 'Mcp-Session-Id header').to.be.a('string').and.not.empty;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}", "description": "Only needed if MCP_CLIENT_API_KEY is set on the server. Leave apiKey empty in dev." }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-06-18\",\n    \"capabilities\": {},\n    \"clientInfo\": { \"name\": \"postman\", \"version\": \"1.0.0\" }\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "Opens an MCP session. The response is SSE; the important part is the `Mcp-Session-Id` response header, captured automatically by the Tests script."
+      }
+    },
+    {
+      "name": "2. notifications/initialized",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"notifications/initialized\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "Completes the MCP handshake. Expect 202 Accepted with an empty body."
+      }
+    },
+    {
+      "name": "3. tools/list",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 2,\n  \"method\": \"tools/list\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "Lists all tools. Confirm each tool's inputSchema.properties now includes a `tenantId` field (24-char hex)."
+      }
+    },
+    {
+      "name": "4a. tools/call - list_doctors (happy path)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 3,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"specialty\": \"cardiology\"\n    }\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "Passes tenantId as a tool argument. With a valid 24-hex tenantId and the backend up, returns real doctor data."
+      }
+    },
+    {
+      "name": "4b. tools/call - get_clinic_profile",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 4,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.get_clinic_profile\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"format\": \"markdown\"\n    }\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "Clinic profile in markdown format."
+      }
+    },
+    {
+      "name": "4c. tools/call - appointment_summary",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 5,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"statistics.get_appointment_summary\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"from\": \"2026-07-01\",\n      \"to\": \"2026-07-07\"\n    }\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "Statistics tool with tenantId + date range in arguments."
+      }
+    },
+    {
+      "name": "5a. Negative - missing tenant",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 6,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {}\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "No tenantId argument and no x-tenant-id header. Expect isError:true with 'Tenant context is missing...'."
+      }
+    },
+    {
+      "name": "5b. Negative - malformed tenant",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 7,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {\n      \"tenantId\": \"abc\"\n    }\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "Malformed tenantId. Expect a JSON-RPC validation error: 'tenantId must be a 24-character hex id (MongoDB ObjectId)'."
+      }
+    },
+    {
+      "name": "6. Legacy - tenant via x-tenant-id header",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" },
+          { "key": "x-tenant-id", "value": "{{tenantId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 8,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {}\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "Backward-compat check: no tenantId argument, tenant supplied via the x-tenant-id header instead. Should still resolve and return data."
+      }
+    }
+  ]
+}

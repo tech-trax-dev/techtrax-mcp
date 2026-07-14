@@ -5,6 +5,8 @@
 > **Scope:** This is a *model-agnostic* integration guide. The MCP server speaks the [Model Context Protocol](https://modelcontextprotocol.io) over **Streamable HTTP**, so any client that can do JSON-RPC tool calling over HTTP can drive it. There is **no SDK lock-in** — everything below is plain HTTP + JSON-RPC.
 >
 > **This document changes no runtime behavior.** It documents the server exactly as it ships today.
+>
+> 📌 **Tenant is passed as the `tenantId` tool argument** (the `x-tenant-id` header remains supported as a legacy fallback). Migrating an existing integration? See the one-page [Tenant ID change notice](./TENANT_ID_MIGRATION.md).
 
 ---
 
@@ -32,7 +34,7 @@ The TechTrax MCP server is a thin, stateless-per-tool **gateway** that exposes t
 | Role | What it is | Responsibility |
 |------|-----------|----------------|
 | **Frontend widget** | The `ChatbotWidget` in the TechTrax React app (`src/shared/components/ui/ChatbotWidget`) | Knows the logged-in **patient** and the active **tenant**. Sends the user's message + that context to the agent runtime. |
-| **AI Agent runtime** | Your service: an LLM **+** an MCP client | Holds the conversation, lists tools, lets the model pick a tool, issues `tools/call`, feeds results back. Owns the `x-tenant-id` header and the `patientId` tool argument. |
+| **AI Agent runtime** | Your service: an LLM **+** an MCP client | Holds the conversation, lists tools, lets the model pick a tool, issues `tools/call`, feeds results back. Injects the `tenantId` and `patientId` tool arguments. |
 | **MCP server** | This repo (`techtrax-mcp`, NestJS + `@rekog/mcp-nest`) | Exposes 21 tools across 4 namespaces over `POST /mcp`. Validates inbound auth, resolves tenant, proxies to the backend. |
 | **TechTrax backend** | The Express + MongoDB API (`techtrax-backend`) | The source of truth. Exposes `/api/v1/mcp/*` endpoints the MCP server calls. |
 
@@ -49,9 +51,9 @@ sequenceDiagram
 
     U->>W: "Book me with Dr. Smith tomorrow"
     W->>A: message + tenantId + patientId
-    Note over A: store tenantId → header<br/>store patientId → tool args
+    Note over A: store tenantId + patientId → tool args
 
-    A->>M: initialize (x-api-key, x-tenant-id)
+    A->>M: initialize (x-api-key)
     M-->>A: 200 + Mcp-Session-Id
     A->>M: notifications/initialized
     A->>M: tools/list
@@ -59,7 +61,7 @@ sequenceDiagram
 
     loop Tool-calling loop
         A->>A: model picks a tool + args
-        A->>M: tools/call (Mcp-Session-Id, x-tenant-id)
+        A->>M: tools/call (Mcp-Session-Id, tenantId in arguments)
         M->>B: GET/POST /api/v1/mcp/... (x-internal-api-key, x-tenant-id)
         B-->>M: { status, message, data }
         M-->>A: { content[], structuredContent, isError? }
@@ -70,28 +72,30 @@ sequenceDiagram
     W-->>U: rendered reply
 ```
 
-### The single most important rule: header vs. argument
+### The single most important rule: identity travels as tool arguments
 
-This trips up every new integrator. Internalize it now:
+Both pieces of identity are **tool arguments** your agent runtime injects into every `tools/call`:
 
-| Identity | How it travels | Why |
-|----------|----------------|-----|
-| **Tenant** (which clinic) | **HTTP header** `x-tenant-id` (a Mongo ObjectId) | It is request/session context, not data the model reasons about. The model should never see, choose, or hallucinate it. The MCP server reads it from the request and forwards it to the backend. |
-| **Patient** (which person) | **Tool argument** `patientId` (a string) | It *is* data the model reasons about: it must look it up (`appointment.find_patient`), confirm it, and pass it explicitly into write tools like `appointment.book`. |
+| Identity | How it travels | Who supplies it |
+|----------|----------------|-----------------|
+| **Tenant** (which clinic) | **Tool argument** `tenantId` (a 24-char hex Mongo ObjectId) | The agent runtime injects it into **every** tool call from session context. The model does not need to invent it. |
+| **Patient** (which person) | **Tool argument** `patientId` (a string) | Data the model reasons about: it looks it up (`appointment.find_patient`), confirms it, and passes it into write tools like `appointment.book`. For patient self-booking it comes from session context (§6.1). |
 
-> **Never** put `patientId` in a header. **Never** put `tenantId` in a tool argument. The server's tenant resolver (`resolveTenantId`) only ever reads tenant from `request.user.*` or the `x-tenant-id` header — it will not look at tool args.
+> **Every `tools/call` must include `tenantId`.** The server validates it as a 24-char hex ObjectId and forwards it to the backend as the `x-tenant-id` header. To keep the JSON snippets in this guide readable, **`tenantId` is omitted from most `arguments` examples — inject it on every call anyway.**
+
+> **Legacy header & precedence (no conflict).** For backward compatibility the server *also* accepts the tenant via the `x-tenant-id` **HTTP header**. The resolver (`resolveTenantId`) reads, in order: **① the `tenantId` argument → ② `request.user` → ③ the `x-tenant-id` header.** If both an argument and a header are present, **the argument wins.** Pick one transport per integration; **new integrations should use the `tenantId` argument.**
 
 ---
 
 ## 2. The startup flow (frontend → agent)
 
-Before a single MCP call happens, the agent runtime needs two pieces of context from the frontend: the **tenantId** (for the header) and the **patientId** (for tool args).
+Before a single MCP call happens, the agent runtime needs two pieces of context from the frontend: the **tenantId** and the **patientId** — both injected into tool **arguments**.
 
 ### Where the frontend gets each value
 
 | Value | Source in the React app | Notes |
 |-------|--------------------------|-------|
-| `tenantId` | `tenantService.getTenant()` → `_id` | The Mongo ObjectId of the active clinic/tenant. This becomes the `x-tenant-id` header. |
+| `tenantId` | `tenantService.getTenant()` → `_id` | The Mongo ObjectId of the active clinic/tenant. This becomes the `tenantId` **argument** on every tool call. |
 | `patientId` | The current patient context (route param / `usePatientId()`) | The Mongo ObjectId of the signed-in patient. This becomes the `patientId` **argument** on booking tools. |
 | `message` | The text the user typed in the widget | The natural-language turn fed to the model. |
 
@@ -99,13 +103,13 @@ Before a single MCP call happens, the agent runtime needs two pieces of context 
 
 ```text
 on receive { message, tenantId, patientId }:
-    session.tenantId  = tenantId      # → x-tenant-id header on every /mcp request
+    session.tenantId  = tenantId      # → tenantId argument on every tools/call
     session.patientId = patientId     # → patientId argument on booking tools
     append message to conversation
     run tool-calling loop  (sections 3–4)
 ```
 
-- `tenantId` is **pinned for the whole MCP session** (see §3 — handlers bind to the session's first request).
+- `tenantId` is kept in session context and injected into the `arguments` of **every** `tools/call` (a legacy `x-tenant-id` header is also honored — see §1).
 - `patientId` is kept in agent memory and injected into tool args when (and only when) a tool needs it. **Patient self-booking (§6.1)** uses this value directly and skips `find_patient`. **Staff booking (§6.2)** does not receive a `patientId` — the agent must resolve one via `appointment.find_patient` first.
 
 ---
@@ -131,19 +135,18 @@ Key transport facts (from `app.module.ts`):
 | `content-type` | `application/json` | every request | You POST JSON-RPC. |
 | `accept` | `application/json, text/event-stream` | every request | The transport streams responses; advertise both. |
 | `x-api-key` | your MCP client key | every request | Validated by `McpClientGuard` against `MCP_CLIENT_API_KEY`. **No-op when the key is unset** (local/dev); **required in production** (env validation enforces it). |
-| `x-tenant-id` | tenant Mongo ObjectId | **must be present on `initialize`** | Handlers bind tenant from the session's first request. Send it on every request anyway — it's cheap and explicit. |
+| `x-tenant-id` | tenant Mongo ObjectId | *optional (legacy)* | **Deprecated in favor of the `tenantId` tool argument.** Still honored as a fallback; the argument wins if both are sent. New integrations don't need this header — pass `tenantId` in each `tools/call` instead. |
 | `mcp-session-id` | the id returned by `initialize` | every request **after** `initialize` | Omit on `initialize` (the server mints it). Required on everything afterward. |
 
 ### Step 1 — `initialize`
 
-Send the JSON-RPC `initialize` request. Note the headers — **`x-tenant-id` is on this very first POST**.
+Send the JSON-RPC `initialize` request. No tenant is needed yet — `tenantId` travels later as a **tool argument** on each `tools/call`.
 
 ```bash
 curl -i -X POST http://localhost:3100/mcp \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
   -H 'x-api-key: YOUR_MCP_CLIENT_KEY' \
-  -H 'x-tenant-id: 6650f1a2b3c4d5e6f7a8b9c0' \
   -d '{
     "jsonrpc": "2.0",
     "id": 1,
@@ -178,7 +181,6 @@ curl -i -X POST http://localhost:3100/mcp \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
   -H 'x-api-key: YOUR_MCP_CLIENT_KEY' \
-  -H 'x-tenant-id: 6650f1a2b3c4d5e6f7a8b9c0' \
   -H 'mcp-session-id: 2f9c1e7a-...-a1b2c3' \
   -d '{ "jsonrpc": "2.0", "method": "notifications/initialized" }'
 ```
@@ -192,9 +194,32 @@ curl -i -X POST http://localhost:3100/mcp \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
   -H 'x-api-key: YOUR_MCP_CLIENT_KEY' \
-  -H 'x-tenant-id: 6650f1a2b3c4d5e6f7a8b9c0' \
   -H 'mcp-session-id: 2f9c1e7a-...-a1b2c3' \
   -d '{ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }'
+```
+
+### Step 4 — `tools/call` (note `tenantId` in `arguments`)
+
+The tenant travels here, as a tool argument — **not** as a header:
+
+```bash
+curl -i -X POST http://localhost:3100/mcp \
+  -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' \
+  -H 'x-api-key: YOUR_MCP_CLIENT_KEY' \
+  -H 'mcp-session-id: 2f9c1e7a-...-a1b2c3' \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "tenant_info.list_doctors",
+      "arguments": {
+        "tenantId": "6650f1a2b3c4d5e6f7a8b9c0",
+        "specialty": "cardiology"
+      }
+    }
+  }'
 ```
 
 ### Stateful-session rules
@@ -202,7 +227,7 @@ curl -i -X POST http://localhost:3100/mcp \
 | Situation | What to send | Server behavior |
 |-----------|--------------|-----------------|
 | **New session** | `initialize` **without** `mcp-session-id` | Mints a new id, returns it in the `Mcp-Session-Id` response header. |
-| **Continue a session** | any method **with** the valid `mcp-session-id` | Reuses the existing session and its bound tenant context. |
+| **Continue a session** | any method **with** the valid `mcp-session-id` | Reuses the existing session. Tenant is **not** bound to the session — pass `tenantId` in the `arguments` of each `tools/call`. |
 | **Invalid / unknown / expired session** | a `mcp-session-id` the server doesn't recognize | Request is rejected (HTTP 4xx / JSON-RPC error). **Re-run `initialize`** to get a fresh session, then retry. |
 | **Server restarted** | an id from before the restart | Sessions are in-memory; they don't survive restarts. Treat as "invalid session" → re-`initialize`. |
 
@@ -221,7 +246,6 @@ class TechTraxMcp:
             "content-type": "application/json",
             "accept": "application/json, text/event-stream",
             "x-api-key": self.api_key,
-            "x-tenant-id": self.tenant_id,
         }
         if self.session_id:
             h["mcp-session-id"] = self.session_id
@@ -245,8 +269,11 @@ class TechTraxMcp:
         return self._post({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
 
     def call_tool(self, name, args):
+        # Inject the tenant into every call from session context — the model
+        # never has to supply it. Caller-provided args can't override it.
         return self._post({"jsonrpc": "2.0", "id": next_id(), "method": "tools/call",
-                           "params": {"name": name, "arguments": args}})
+                           "params": {"name": name,
+                                      "arguments": {**args, "tenantId": self.tenant_id}}})
 ```
 
 > Many languages have a ready-made MCP client (e.g. the official MCP SDKs) that handles the SSE parsing, session id, and handshake for you. The pseudocode above is what they do under the hood.
@@ -333,6 +360,8 @@ Every tool returns the same envelope:
 ## 5. `tenant_info` namespace guide
 
 Four read-only tools answer "questions about the clinic and its doctors." All are idempotent and safe to retry. All accept the optional `format` arg.
+
+> **`tenantId` applies to every tool in this guide.** Each tool takes a required `tenantId` argument (24-char hex ObjectId), injected by your runtime from session context (see §1). It is **omitted from the per-tool param tables below for brevity** — always include it in `arguments`.
 
 | Tool | Use it for | Required args | Optional args |
 |------|-----------|---------------|---------------|
@@ -495,7 +524,7 @@ The two subsections below are **canonical examples**, not mandatory flows. They 
 
 | Field | Source | Status |
 |-------|--------|--------|
-| `tenantId` | Frontend → agent | Known (becomes `x-tenant-id` header) |
+| `tenantId` | Frontend → agent | Known — injected as the `tenantId` argument on every call |
 | `patientId` | Frontend → agent (`usePatientId()` / route context) | **Known** — no `find_patient` needed |
 | `doctorId` | Resolve as needed | Usually missing |
 | `appointmentDateTime` | Resolve via `get_available_slots` | Missing |
@@ -569,7 +598,7 @@ Then continue with `get_available_slots` → confirm → `book` exactly as above
 
 | Field | Source | Status |
 |-------|--------|--------|
-| `tenantId` | Frontend / staff session | Known (`x-tenant-id` header) |
+| `tenantId` | Frontend / staff session | Known — injected as the `tenantId` argument on every call |
 | `actorUserId` | Staff user's id | Known — pass on `book` for audit (who booked) |
 | `patientId` | Resolve via `find_patient` | **Missing** — must be resolved before `book` |
 | `doctorId` | Resolve as needed | Usually missing |
@@ -657,7 +686,7 @@ Your agent runtime should derive the starting point from **auth context** (role 
 > Selecting the booking path and resolving the inputs is a **rule your agent runtime implements**, not something the MCP server does. The server has **no concept of "patient" vs "receptionist"** — it does not see the user's JWT, does not know the caller's role, and does not gate tools by role.
 >
 > What the MCP server *actually* does:
-> - Resolves the **tenant** from `x-tenant-id` (or `request.user`) and forwards it to the backend.
+> - Resolves the **tenant** from the `tenantId` argument (falling back to `request.user` or the legacy `x-tenant-id` header) and forwards it to the backend.
 > - Exposes the **same 21 tools to every caller** — `find_patient`, `book`, etc. are all callable regardless of who is asking.
 > - Validates **inbound auth** (`x-api-key`) and **tool argument shapes** (Zod) — nothing more.
 >
@@ -672,7 +701,8 @@ Your agent runtime should derive the starting point from **auth context** (role 
 > | Who is the user / what role | **Agent runtime** |
 > | Pick the booking path & which tools to call | **Agent runtime** |
 > | Resolve & inject `patientId` / `actorUserId` | **Agent runtime** |
-> | Tenant scoping (`x-tenant-id` → backend) | MCP server |
+> | Inject the `tenantId` argument on every call | **Agent runtime** |
+> | Tenant scoping (`tenantId` arg → `x-tenant-id` → backend) | MCP server |
 > | Tool catalog + argument validation | MCP server |
 > | Slot/shift/conflict validation, real authorization | TechTrax backend |
 >
@@ -783,7 +813,7 @@ Also removes the appointment from the queue and cancels any linked online meetin
 
 ## 7. Statistics tools guide
 
-Eight read-only analytics tools. All are idempotent and safe to retry. All share the **same range params**.
+Eight read-only analytics tools. All are idempotent and safe to retry. All share the **same range params** — and, like every tool, take the required `tenantId` argument (§1), omitted below for brevity.
 
 ### Shared `rangeParams`
 
@@ -840,7 +870,7 @@ Eight read-only analytics tools. All are idempotent and safe to retry. All share
 | Hop | Header | Purpose |
 |-----|--------|---------|
 | Agent → MCP | `x-api-key` | Inbound auth (`MCP_CLIENT_API_KEY`); no-op if unset, required in prod |
-| Agent → MCP | `x-tenant-id` | Tenant ObjectId; **must be on `initialize`**, send on all requests |
+| Agent → MCP | *(tenant)* | Pass tenant as the **`tenantId` tool argument** on every `tools/call` (24-char hex). Legacy `x-tenant-id` header still honored as a fallback; the argument wins if both are sent. |
 | Agent → MCP | `mcp-session-id` | Session id from `initialize`; required on all later requests |
 | Agent → MCP | `content-type: application/json` + `accept: application/json, text/event-stream` | JSON-RPC in, SSE out |
 | MCP → Backend | `x-internal-api-key` | Outbound auth (`BACKEND_API_KEY`) — handled by the server, not you |
@@ -878,7 +908,8 @@ Eight read-only analytics tools. All are idempotent and safe to retry. All share
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| `isError: true`, *"Tenant context is missing…"* | No `x-tenant-id` (and no `request.user` tenant) on the session | Send `x-tenant-id` on `initialize` (and every request). |
+| `isError: true`, *"Tenant context is missing…"* | No `tenantId` argument (and no `x-tenant-id` header) on the call | Add `tenantId` (24-char hex ObjectId) to the tool `arguments`. |
+| Validation error, *"tenantId must be a 24-character hex id…"* | Malformed `tenantId` argument | Pass a valid 24-char hex Mongo ObjectId (not a name/slug). |
 | **401 Unauthorized** / *"Invalid MCP client API key"* | Missing/wrong `x-api-key` while `MCP_CLIENT_API_KEY` is set | Send the correct key. In dev, the key may be unset (auth disabled). |
 | HTTP 4xx about an **unknown/invalid session** | `mcp-session-id` not recognized (expired, or server restarted) | Re-run `initialize`, capture the new `Mcp-Session-Id`, retry. |
 | `isError: true`, *"Doctor not found…"* | Bad `doctorId` | Call `tenant_info.list_doctors` for valid ids. |

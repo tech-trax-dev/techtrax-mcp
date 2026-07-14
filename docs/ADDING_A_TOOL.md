@@ -24,8 +24,8 @@ flowchart LR
 
 A tool is a thin adapter. Its only job:
 
-1. Validate input (Zod `parameters`).
-2. Resolve tenant context.
+1. Validate input (Zod `parameters`), including the shared `tenantId` param.
+2. Resolve tenant context via `resolveTenantId(request, args)`.
 3. Make **one** backend call via `BackendHttpService`.
 4. Shape the response into an `McpToolResult` (text + `structuredContent`).
 
@@ -78,21 +78,22 @@ export type ClinicStatusOutput = z.infer<typeof ClinicStatusOutputSchema>;
     "Returns whether the clinic is open right now: name, timezone, and " +
     "currentStatus (open_now | closed_now | closed_today). Use for 'is the " +
     "clinic open?' questions. For full contact/hours use get_clinic_profile.",
-  parameters: z.object({ format: formatSchema.optional() }),
+  parameters: z.object({
+    tenantId: tenantIdParam,
+    format: formatSchema.optional(),
+  }),
   outputSchema: ClinicStatusOutputSchema,
   annotations: TOOL_ANNOTATIONS,
 })
 async getClinicStatus(
-  args: { format?: OutputFormat },
+  args: { tenantId?: string; format?: OutputFormat },
   _context: unknown,
   request?: ToolRequest,
 ): Promise<McpToolResult> {
   const format = args.format ?? 'json';
-  const tenantId = this.resolveTenantId(request);
+  const tenantId = resolveTenantId(request, args);
   if (!tenantId) {
-    return errorResult(
-      'Tenant context is missing. Please authenticate with a tenant-scoped client.',
-    );
+    return missingTenant();
   }
 
   try {
@@ -149,13 +150,14 @@ import { BackendHttpService } from '../../common/backend/backend-http.service';
 import { BackendException } from '../../common/errors/backend.exception';
 import { errorResult } from '../../common/mcp/tool-response.util';
 import type { McpToolResult } from '../../common/mcp/tool-response.util';
+import {
+  resolveTenantId,
+  missingTenant,
+  tenantIdParam,
+} from '../../common/mcp/tenant.util';
+import type { ToolRequest } from '../../common/mcp/tenant.util';
 import { InvoiceOutputSchema } from '../../contracts/billing.schemas';
 import type { InvoiceOutput } from '../../contracts/billing.schemas';
-
-type ToolRequest = {
-  headers?: Record<string, string | string[] | undefined>;
-  user?: { tenantId?: string; tenant?: { id?: string } };
-};
 
 // Read-only lookup: safe to retry, no side effects, talks to an external system.
 const TOOL_ANNOTATIONS = {
@@ -176,21 +178,20 @@ export class BillingTools {
       '(paid | unpaid | partial), issuedAt, paidAt. Use for billing/payment ' +
       'questions about a specific invoice. Returns an error if the id is unknown.',
     parameters: z.object({
+      tenantId: tenantIdParam,
       invoiceId: z.string().min(1).describe('The invoice id to look up.'),
     }),
     outputSchema: InvoiceOutputSchema,
     annotations: TOOL_ANNOTATIONS,
   })
   async getInvoice(
-    args: { invoiceId: string },
+    args: { tenantId?: string; invoiceId: string },
     _context: unknown,
     request?: ToolRequest,
   ): Promise<McpToolResult> {
-    const tenantId = this.resolveTenantId(request);
+    const tenantId = resolveTenantId(request, args);
     if (!tenantId) {
-      return errorResult(
-        'Tenant context is missing. Please authenticate with a tenant-scoped client.',
-      );
+      return missingTenant();
     }
 
     try {
@@ -206,20 +207,13 @@ export class BillingTools {
       return errorResult(`Failed to fetch invoice: ${(e as Error).message}`);
     }
   }
-
-  private resolveTenantId(request?: ToolRequest): string | null {
-    const fromUser = request?.user?.tenantId ?? request?.user?.tenant?.id;
-    if (fromUser) return fromUser;
-    const h = request?.headers?.['x-tenant-id'];
-    if (typeof h === 'string' && h.trim()) return h.trim();
-    if (Array.isArray(h) && h[0]?.trim()) return h[0].trim();
-    return null;
-  }
 }
 ```
 
-> Tip: for multi-tool namespaces, copy the `resolveTenantId` / `getWithTenantHeader`
-> / `formatResult` helpers from
+> Tip: `resolveTenantId`, `missingTenant`, and `tenantIdParam` are shared from
+> [`common/mcp/tenant.util.ts`](../src/common/mcp/tenant.util.ts) — import them
+> rather than re-implementing per namespace. For multi-tool namespaces, copy the
+> `getWithTenantHeader` / `formatResult` helpers from
 > [`tenant-info.tools.ts`](../src/tools/tenant-info/tenant-info.tools.ts) so you get
 > the shared `format: json | markdown` support for free.
 
@@ -356,8 +350,11 @@ case, and a missing-tenant case.
 **Backend calls**
 - Exactly one backend call per tool. Go through `BackendHttpService` only — never
   import axios directly.
-- Always pass the `x-tenant-id` header (via `getWithTenantHeader` or inline). The
-  backend's `mcpInternalAuth` middleware rejects calls without a valid tenant id.
+- Expose the shared `tenantId` param (`tenantIdParam`) and resolve with
+  `resolveTenantId(request, args)`. Precedence is: tool argument → `request.user`
+  → `x-tenant-id` header. Always forward the resolved id to the backend as the
+  `x-tenant-id` header (via `getWithTenantHeader` or inline). The backend's
+  `mcpInternalAuth` middleware rejects calls without a valid tenant id.
 - `encodeURIComponent` every path segment that comes from input.
 
 **Security / data hygiene**
@@ -372,7 +369,8 @@ case, and a missing-tenant case.
 - [ ] Output schema in `src/contracts/<name>.schemas.ts`, nullable where needed.
 - [ ] `@Tool` has `name`, a model-grade `description`, `parameters`, `outputSchema`,
       `annotations`.
-- [ ] Tenant context resolved; missing-tenant returns `errorResult`.
+- [ ] `tenantId` param exposed (`tenantIdParam`); tenant resolved via
+      `resolveTenantId(request, args)`; missing-tenant returns `missingTenant()`.
 - [ ] Exactly one `BackendHttpService` call; `x-tenant-id` sent; inputs encoded.
 - [ ] Returns `structuredContent` on success; `isError` on failure; known statuses
       mapped.

@@ -211,6 +211,20 @@ describe('AppointmentTools', () => {
       expect(backend.get).not.toHaveBeenCalled();
     });
 
+    it('resolves the tenant from the tool argument with no header/user', async () => {
+      backend.get.mockResolvedValue(appointmentsListResponse);
+      const argTenant = '64b7f0000000000000000002';
+      await tools.listAppointments(
+        { tenantId: argTenant },
+        undefined,
+        {}, // no request.user, no x-tenant-id header
+      );
+      expect(backend.get).toHaveBeenCalledWith(
+        '/api/v1/mcp/appointments',
+        expect.objectContaining({ headers: { 'x-tenant-id': argTenant } }),
+      );
+    });
+
     it('marks cancel as destructive and book/reschedule as non-readonly writes', () => {
       expect(getToolMetadata('cancel').annotations).toMatchObject({
         readOnlyHint: false,
