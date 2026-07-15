@@ -93,7 +93,7 @@ jobs:
           # Creds are piped in per-deploy and logged out afterwards, so no
           # long-lived registry token is left sitting in the VM's docker config.
           envs: TAG,REGISTRY_USER,REGISTRY_TOKEN
-          script_stops: true
+          script_stop: true
           script: |
             set -euo pipefail
             cd ~/techtrax-mcp
