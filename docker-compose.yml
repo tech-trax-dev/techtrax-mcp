@@ -2,7 +2,12 @@
 # Production secrets come from an env file the DevOps team provides (NOT committed).
 #
 #   cp .env.production.example .env.production   # then fill in real values
-#   docker compose up -d --build
+#   docker compose up -d --build                 # local: build from source
+#
+# Production does NOT build: CD (.github/workflows/cd.yml) pushes an image to
+# Docker Hub (techtrax/mcp-server) and the VM runs a specific tag:
+#
+#   IMAGE_TAG=<commit-sha> docker compose pull && docker compose up -d --no-build
 #
 # NOTE on scaling: the streamable-HTTP transport keeps session state in memory.
 # Run a SINGLE replica, or put sticky sessions (session affinity) in front of
@@ -13,7 +18,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: techtrax/mcp-server:latest
+    # IMAGE_TAG pins the exact build to run; CD sets it to the commit SHA, so a
+    # rollback is just re-running with an older tag. Defaults to latest for local use.
+    image: techtrax/mcp-server:${IMAGE_TAG:-latest}
     container_name: techtrax-mcp-server
     restart: unless-stopped
     env_file:
