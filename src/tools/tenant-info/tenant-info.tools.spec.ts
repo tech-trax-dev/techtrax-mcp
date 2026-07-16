@@ -46,10 +46,8 @@ const paginatedDoctorsResponse = {
       id: 'doc1',
       fullName: 'Jane Doe',
       specialty: 'Cardiology',
-      bio: null,
       presenceStatus: 'present' as const,
-      supportsOnline: true,
-      supportsOffline: false,
+      totalAppointments: 12,
     },
   ],
   pagination: {
@@ -85,6 +83,7 @@ const clinicProfileResponse = {
 const doctorProfileResponse = {
   firstName: 'Jane',
   lastName: 'Doe',
+  fullName: 'Jane Doe',
   email: null,
   phone: null,
   specialty: 'Cardiology',
@@ -98,7 +97,8 @@ const doctorProfileResponse = {
     level: null,
   },
   certifications: [],
-  experience: null,
+  totalAppointments: 0,
+  totalPatients: 0,
 };
 
 const doctorAvailabilityResponse = {

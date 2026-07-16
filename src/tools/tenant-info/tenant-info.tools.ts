@@ -83,13 +83,11 @@ export class TenantInfoTools {
   @Tool({
     name: 'tenant_info.list_doctors',
     description:
-      "Lists and filters doctors in the clinic. Returns per doctor: id, fullName, specialty, bio, presenceStatus (present = currently clocked in / accepting; absent = not), supportsOnline, supportsOffline. Use this to answer 'which doctors' questions (directory, by name, by specialty, by online/offline support, by presence). For one specific doctor's bookable availability use tenant_info.get_doctor_availability; for credentials use tenant_info.get_doctor_profile. Results are paginated: read pagination.has_more. To paginate, pass `next_page` from the previous response as the `page` param in your next call. When `has_more` is false, you have reached the last page. An empty doctors array is a valid result (the clinic has no doctors matching the filters), not an error.",
+      "Lists and filters doctors in the clinic. Returns per doctor: id, fullName, specialty, presenceStatus (present = currently clocked in / accepting; absent = not), and totalAppointments (completed appointment count). Use this to answer 'which doctors' questions (directory, by name, by specialty, by presence). For one specific doctor's bookable availability and online/offline support use tenant_info.get_doctor_availability; for credentials use tenant_info.get_doctor_profile. Results are paginated: read pagination.has_more. To paginate, pass `next_page` from the previous response as the `page` param in your next call. When `has_more` is false, you have reached the last page. An empty doctors array is a valid result (the clinic has no doctors matching the filters), not an error.",
     parameters: z.object({
       tenantId: tenantIdParam,
       name: z.string().min(1).optional(),
       specialty: z.string().min(1).optional(),
-      supportsOnline: z.boolean().optional(),
-      supportsOffline: z.boolean().optional(),
       presenceStatus: z
         .enum(['present', 'absent'])
         .optional()
@@ -108,8 +106,6 @@ export class TenantInfoTools {
       tenantId?: string;
       name?: string;
       specialty?: string;
-      supportsOnline?: boolean;
-      supportsOffline?: boolean;
       presenceStatus?: 'present' | 'absent';
       page?: number;
       limit?: number;
@@ -132,8 +128,6 @@ export class TenantInfoTools {
           params: {
             name: args.name,
             specialty: args.specialty,
-            supportsOnline: args.supportsOnline,
-            supportsOffline: args.supportsOffline,
             presenceStatus: args.presenceStatus,
             page: args.page,
             limit: args.limit,
@@ -154,7 +148,7 @@ export class TenantInfoTools {
   @Tool({
     name: 'tenant_info.get_doctor_profile',
     description:
-      "Returns one doctor's STATIC professional profile: name, email, phone, specialty, bio, education (university/faculty/major/graduationYear/degree/level), certifications (certificationName + year), and experience range (0-2,3-5,6-8,9-10,10+). Use for 'who is this doctor / background / credentials' questions. Does NOT include schedule or availability — use tenant_info.get_doctor_availability for that.",
+      "Returns one doctor's STATIC professional profile: name (firstName/lastName/fullName), email, phone, specialty, bio, education (university/faculty/major/graduationYear/degree/level), certifications (certificationName + year), and lifetime totals (totalAppointments, totalPatients). Use for 'who is this doctor / background / credentials' questions. Does NOT include schedule or availability — use tenant_info.get_doctor_availability for that.",
     parameters: z.object({
       tenantId: tenantIdParam,
       doctorId: z.string().min(1),
@@ -310,18 +304,10 @@ export class TenantInfoTools {
   }
 
   private renderDoctorsMarkdown(data: DoctorsListOutput): string {
-    const doctorsLines = data.doctors.map((doctor) => {
-      const modes =
-        doctor.supportsOnline && doctor.supportsOffline
-          ? 'online + offline'
-          : doctor.supportsOnline
-            ? 'online only'
-            : doctor.supportsOffline
-              ? 'offline only'
-              : 'no shift modes configured';
-
-      return `- **${doctor.fullName}** (${doctor.id}) — specialty: ${doctor.specialty ?? 'N/A'}, presence: ${doctor.presenceStatus}, modes: ${modes}`;
-    });
+    const doctorsLines = data.doctors.map(
+      (doctor) =>
+        `- **${doctor.fullName}** (${doctor.id}) — specialty: ${doctor.specialty ?? 'N/A'}, presence: ${doctor.presenceStatus}, completed appointments: ${doctor.totalAppointments}`,
+    );
 
     return [
       '# Doctors',
@@ -349,12 +335,13 @@ export class TenantInfoTools {
         : '- None';
 
     return [
-      `# ${data.firstName} ${data.lastName}`,
+      `# ${data.fullName || 'Doctor'}`,
       '',
       `- **Email:** ${data.email ?? 'N/A'}`,
       `- **Phone:** ${data.phone ?? 'N/A'}`,
       `- **Specialty:** ${data.specialty ?? 'N/A'}`,
-      `- **Experience:** ${data.experience ?? 'N/A'}`,
+      `- **Completed appointments:** ${data.totalAppointments}`,
+      `- **Total patients:** ${data.totalPatients}`,
       '',
       '## Bio',
       data.bio ?? 'N/A',

@@ -6,7 +6,9 @@ import { z } from 'zod';
  * These Zod schemas are attached to each `@Tool({ outputSchema })` so the MCP
  * `tools/list` advertises the exact shape a tool returns and clients can rely on
  * `structuredContent`. They mirror the payloads produced by the TechTrax backend
- * `mcpTenantInfo.service.js`. Fields that the backend may omit are `.nullable()`.
+ * MCP module (`src/modules/mcp`), which reuses the SAME CMS services the
+ * frontend uses (doctor-list / doctor-profile-overview / shifts). Fields that
+ * the backend may omit are `.nullable()`.
  */
 
 export const ClinicOperatingHourSchema = z.object({
@@ -55,10 +57,8 @@ export const DoctorListItemSchema = z.object({
   id: z.string(),
   fullName: z.string(),
   specialty: z.string().nullable(),
-  bio: z.string().nullable(),
   presenceStatus: z.enum(['present', 'absent']),
-  supportsOnline: z.boolean(),
-  supportsOffline: z.boolean(),
+  totalAppointments: z.number(),
 });
 
 export const DoctorsListPaginationSchema = z.object({
@@ -89,21 +89,19 @@ export const DoctorCertificationSchema = z.object({
   year: z.number().nullable(),
 });
 
-export const DoctorExperienceSchema = z
-  .enum(['0-2', '3-5', '6-8', '9-10', '10+'])
-  .nullable();
-
 /** Output of `tenant_info.get_doctor_profile`. */
 export const DoctorProfileOutputSchema = z.object({
-  firstName: z.string(),
-  lastName: z.string(),
+  firstName: z.string().nullable(),
+  lastName: z.string().nullable(),
+  fullName: z.string(),
   email: z.string().nullable(),
   phone: z.string().nullable(),
   specialty: z.string().nullable(),
   bio: z.string().nullable(),
   education: DoctorEducationSchema,
   certifications: z.array(DoctorCertificationSchema),
-  experience: DoctorExperienceSchema,
+  totalAppointments: z.number(),
+  totalPatients: z.number(),
 });
 
 export const DoctorScheduleEntrySchema = z.object({
