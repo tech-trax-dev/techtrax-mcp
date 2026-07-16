@@ -1,0 +1,135 @@
+name: CD
+
+# Build once in Actions, push to Docker Hub, then have the VM pull that exact
+# image. The VM never builds — it only runs an artifact CI has already tested.
+#
+# Required repo secrets:
+#   VM_SSH_HOST         - deployment host (the techtrax-mcp VM)
+#   VM_SSH_USER         - ssh user on that host
+#   VM_SSH_KEY          - private half of the CD deploy key (ed25519, no passphrase)
+#   DOCKERHUB_USERNAME  - Docker Hub user with push rights on the techtrax org
+#   DOCKERHUB_TOKEN     - Docker Hub access token, Read & Write scope. Prefer a
+#                         revocable access token over the account password.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Existing image tag to deploy, e.g. a previous commit SHA (rollback). Leave blank to build from HEAD."
+        required: false
+        default: ""
+
+# Never let two deploys touch the VM at once. Don't cancel a running deploy
+# either — a half-finished deploy is worse than a queued one.
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+env:
+  IMAGE: techtrax/mcp-server
+
+jobs:
+  ci:
+    name: CI
+    # Rollbacks redeploy an image that already passed CI when it was built.
+    if: ${{ !inputs.image_tag }}
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Build & push image
+    if: ${{ !inputs.image_tag }}
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # The VM is a standard amd64 GCE instance; skip the slow arm64 leg.
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to VM
+    needs: publish
+    # Runs after a successful publish, or immediately on a rollback dispatch
+    # (where publish/ci are skipped).
+    if: ${{ always() && (needs.publish.result == 'success' || inputs.image_tag) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment: production
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          TAG: ${{ inputs.image_tag || github.sha }}
+          REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        with:
+          host: ${{ secrets.VM_SSH_HOST }}
+          username: ${{ secrets.VM_SSH_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          # Creds are piped in per-deploy and logged out afterwards, so no
+          # long-lived registry token is left sitting in the VM's docker config.
+          envs: TAG,REGISTRY_USER,REGISTRY_TOKEN
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd ~/techtrax-mcp
+
+            # Remember what's running so a failed rollout can be undone.
+            PREV_IMAGE="$(docker inspect -f '{{.Config.Image}}' techtrax-mcp-server 2>/dev/null || true)"
+            echo "currently running: ${PREV_IMAGE:-<nothing>}"
+
+            echo "$REGISTRY_TOKEN" | docker login -u "$REGISTRY_USER" --password-stdin
+            trap 'docker logout >/dev/null 2>&1 || true' EXIT
+
+            # Keep the checkout in step with the image so docker-compose.yml,
+            # which pins the tag, matches what we're deploying.
+            git fetch --prune origin
+            git reset --hard "$TAG" 2>/dev/null || git reset --hard origin/main
+
+            export IMAGE_TAG="$TAG"
+            docker compose pull
+            # --no-build: if the image is missing, fail loudly rather than
+            # silently building on prod and masking a broken publish.
+            docker compose up -d --no-build
+
+            echo "waiting for /healthz/ready ..."
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:3100/healthz/ready >/dev/null 2>&1; then
+                echo "healthy after ${i} attempt(s)"
+                docker image prune -f >/dev/null 2>&1 || true
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "::error::health check failed after 60s — rolling back"
+            docker compose logs --tail 50 mcp-server || true
+            if [ -n "$PREV_IMAGE" ]; then
+              IMAGE_TAG="${PREV_IMAGE##*:}" docker compose up -d --no-build || true
+              echo "rolled back to ${PREV_IMAGE}"
+            fi
+            exit 1
