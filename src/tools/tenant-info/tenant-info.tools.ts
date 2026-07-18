@@ -2,9 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Tool } from '@rekog/mcp-nest';
 import { z } from 'zod';
 import { BackendHttpService } from '../../common/backend/backend-http.service';
-import { BackendException } from '../../common/errors/backend.exception';
-import { errorResult } from '../../common/mcp/tool-response.util';
 import type { McpToolResult } from '../../common/mcp/tool-response.util';
+import { handleToolError } from '../../common/mcp/tool-error.util';
 import {
   resolveTenantId,
   missingTenant,
@@ -71,12 +70,11 @@ export class TenantInfoTools {
         this.renderClinicProfileMarkdown(payload),
       );
     } catch (e) {
-      if (e instanceof BackendException && e.status === 404) {
-        return errorResult('Clinic profile not found for this tenant.');
-      }
-      return errorResult(
-        `Failed to fetch clinic profile: ${(e as Error).message}`,
-      );
+      return handleToolError(e, {
+        tenantId,
+        action: 'fetch clinic profile',
+        notFoundMessage: 'Clinic profile not found for this tenant.',
+      });
     }
   }
 
@@ -141,7 +139,7 @@ export class TenantInfoTools {
         this.renderDoctorsMarkdown(payload),
       );
     } catch (e) {
-      return errorResult(`Failed to list doctors: ${(e as Error).message}`);
+      return handleToolError(e, { tenantId, action: 'list doctors' });
     }
   }
 
@@ -177,14 +175,12 @@ export class TenantInfoTools {
         this.renderDoctorProfileMarkdown(payload),
       );
     } catch (e) {
-      if (e instanceof BackendException && e.status === 404) {
-        return errorResult(
+      return handleToolError(e, {
+        tenantId,
+        action: 'fetch doctor profile',
+        notFoundMessage:
           'Doctor not found. Use list_doctors to retrieve valid doctor IDs.',
-        );
-      }
-      return errorResult(
-        `Failed to fetch doctor profile: ${(e as Error).message}`,
-      );
+      });
     }
   }
 
@@ -220,14 +216,12 @@ export class TenantInfoTools {
         this.renderDoctorAvailabilityMarkdown(payload),
       );
     } catch (e) {
-      if (e instanceof BackendException && e.status === 404) {
-        return errorResult(
+      return handleToolError(e, {
+        tenantId,
+        action: 'fetch doctor availability',
+        notFoundMessage:
           'Doctor not found or has no shift data. Use list_doctors to retrieve valid doctor IDs.',
-        );
-      }
-      return errorResult(
-        `Failed to fetch doctor availability: ${(e as Error).message}`,
-      );
+      });
     }
   }
 

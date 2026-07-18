@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Tool } from '@rekog/mcp-nest';
 import { z } from 'zod';
 import { BackendHttpService } from '../../common/backend/backend-http.service';
-import { errorResult } from '../../common/mcp/tool-response.util';
 import type { McpToolResult } from '../../common/mcp/tool-response.util';
+import { handleToolError } from '../../common/mcp/tool-error.util';
 import {
   resolveTenantId,
   missingTenant,
@@ -273,7 +273,7 @@ export class StatisticsTools {
       });
       return this.formatResult(data, format, markdownFormatter);
     } catch (e) {
-      return errorResult(`Failed to fetch ${action}: ${(e as Error).message}`);
+      return handleToolError(e, { tenantId, action: `fetch ${action}` });
     }
   }
 

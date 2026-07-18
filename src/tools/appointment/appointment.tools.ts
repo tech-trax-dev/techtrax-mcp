@@ -2,9 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Tool } from '@rekog/mcp-nest';
 import { z } from 'zod';
 import { BackendHttpService } from '../../common/backend/backend-http.service';
-import { BackendException } from '../../common/errors/backend.exception';
-import { errorResult } from '../../common/mcp/tool-response.util';
 import type { McpToolResult } from '../../common/mcp/tool-response.util';
+import { handleToolError } from '../../common/mcp/tool-error.util';
 import {
   resolveTenantId,
   missingTenant,
@@ -97,7 +96,7 @@ export class AppointmentTools {
       );
       return this.formatResult(data, format, (p) => this.renderPatients(p));
     } catch (e) {
-      return errorResult(`Failed to find patients: ${(e as Error).message}`);
+      return handleToolError(e, { tenantId, action: 'find patients' });
     }
   }
 
@@ -142,14 +141,12 @@ export class AppointmentTools {
       );
       return this.formatResult(data, format, (p) => this.renderSlots(p));
     } catch (e) {
-      if (e instanceof BackendException && e.status === 404) {
-        return errorResult(
+      return handleToolError(e, {
+        tenantId,
+        action: 'fetch available slots',
+        notFoundMessage:
           'Doctor not found. Use tenant_info.list_doctors to retrieve valid doctor IDs.',
-        );
-      }
-      return errorResult(
-        `Failed to fetch available slots: ${(e as Error).message}`,
-      );
+      });
     }
   }
 
@@ -208,9 +205,7 @@ export class AppointmentTools {
       );
       return this.formatResult(data, format, (p) => this.renderAppointments(p));
     } catch (e) {
-      return errorResult(
-        `Failed to list appointments: ${(e as Error).message}`,
-      );
+      return handleToolError(e, { tenantId, action: 'list appointments' });
     }
   }
 
@@ -242,12 +237,11 @@ export class AppointmentTools {
       );
       return this.formatResult(data, format, (p) => this.renderAppointment(p));
     } catch (e) {
-      if (e instanceof BackendException && e.status === 404) {
-        return errorResult('Appointment not found.');
-      }
-      return errorResult(
-        `Failed to fetch appointment: ${(e as Error).message}`,
-      );
+      return handleToolError(e, {
+        tenantId,
+        action: 'fetch appointment',
+        notFoundMessage: 'Appointment not found.',
+      });
     }
   }
 
@@ -309,7 +303,11 @@ export class AppointmentTools {
       );
       return this.formatResult(data, format, (p) => this.renderAppointment(p));
     } catch (e) {
-      return this.writeError(e, 'book appointment');
+      return handleToolError(e, {
+        tenantId,
+        action: 'book appointment',
+        variant: 'write',
+      });
     }
   }
 
@@ -359,7 +357,11 @@ export class AppointmentTools {
       );
       return this.formatResult(data, format, (p) => this.renderAppointment(p));
     } catch (e) {
-      return this.writeError(e, 'reschedule appointment');
+      return handleToolError(e, {
+        tenantId,
+        action: 'reschedule appointment',
+        variant: 'write',
+      });
     }
   }
 
@@ -406,20 +408,15 @@ export class AppointmentTools {
       );
       return this.formatResult(data, format, (p) => this.renderAppointment(p));
     } catch (e) {
-      return this.writeError(e, 'cancel appointment');
+      return handleToolError(e, {
+        tenantId,
+        action: 'cancel appointment',
+        variant: 'write',
+      });
     }
   }
 
   // ======================== Helpers ========================
-
-  /** Map a backend write failure to a readable, non-throwing tool result. */
-  private writeError(e: unknown, action: string): McpToolResult {
-    if (e instanceof BackendException) {
-      // 400/404/409 carry actionable validation messages from the backend.
-      return errorResult(`Could not ${action}: ${e.message}`);
-    }
-    return errorResult(`Failed to ${action}: ${(e as Error).message}`);
-  }
 
   private getWithTenantHeader<T>(
     tenantId: string,
