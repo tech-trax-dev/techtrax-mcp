@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "TechTrax MCP",
-    "description": "Manual testing for the TechTrax MCP server (Streamable HTTP, stateful).\n\nFlow: run the requests top to bottom.\n1. `initialize` captures the `Mcp-Session-Id` header into the `sessionId` collection variable (see its Tests tab).\n2. `notifications/initialized` completes the handshake.\n3. `tools/list` shows the catalog — confirm every tool now has a `tenantId` param.\n4. `tools/call` requests pass `tenantId` in `arguments`.\n\n⚠️ Authorization / `x-actor-role`: this server reads request headers ONCE, on `initialize`. The `x-actor-role` header therefore belongs on the `initialize` request only (it is set there via the `actorRole` variable) and applies to the whole session — putting it on a `tools/call` has no effect. `actorRole` defaults to `receptionist` so the staff + CRM tools show up. Set it to `patient` (least privilege) and re-run `initialize` to see the CRM/statistics/patient tools disappear from `tools/list` and get rejected on call. A session = one actor; to switch role, re-run `initialize`.\n\nEdit collection variables (baseUrl, tenantId, apiKey, actorRole, leadId, assigneeId) under the collection's Variables tab.\n\nNote: responses come back as SSE (`text/event-stream`) by default. The body shows a `data: {...}` line. To get plain JSON instead, set `enableJsonResponse: true` in `src/app.module.ts` (dev only).\n\nSee docs/MANUAL_TESTING.md and docs/MCP_TOOL_AUTHORIZATION.md for the full guide.",
+    "description": "Manual testing for the TechTrax MCP server (Streamable HTTP, stateful).\n\nFlow: run the requests top to bottom.\n1. `initialize` sets the session's role and captures the `Mcp-Session-Id` header into the `sessionId` collection variable (see its Tests tab).\n2. `notifications/initialized` completes the handshake.\n3. `tools/list` shows the catalog — the list is FILTERED by the session role.\n4. `tools/call` requests pass `tenantId` in `arguments`.\n\n⚠️ Authorization / `actorRole`: the caller's role is set ONCE, in the `initialize` request's `params.actorRole` (NOT a header, NOT a per-call argument). It applies to the WHOLE session — a session = one actor. Allowed values: patient | doctor | receptionist | admin. Omitted/unknown → `patient` (least privilege). The `actorRole` collection variable (default `receptionist`) is substituted into the initialize params. Because the role is session-scoped, `tools/list` is FILTERED: a `patient` session only SEES patient-allowed tools (statistics.*, crm.*, find_patient, list/get appointment are hidden), and calling a disallowed tool is rejected. To switch role: change `actorRole` and re-run `initialize` (new session).\n\nEdit collection variables (baseUrl, tenantId, apiKey, actorRole, leadId, assigneeId) under the collection's Variables tab.\n\nNote: responses come back as SSE (`text/event-stream`) by default. The body shows a `data: {...}` line. To get plain JSON instead, set `enableJsonResponse: true` in `src/app.module.ts` (dev only).\n\nSee docs/MANUAL_TESTING.md and docs/MCP_TOOL_AUTHORIZATION.md for the full guide.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -23,7 +23,8 @@
     {
       "key": "actorRole",
       "value": "receptionist",
-      "type": "string"
+      "type": "string",
+      "description": "Session role, sent in the initialize request's params.actorRole: patient | doctor | receptionist | admin. Omitted/unknown → patient (least privilege). Default receptionist here so staff + CRM tools are visible/usable; set to patient and re-run initialize to see tools/list filtered down to the patient set."
     },
     {
       "key": "leadId",
@@ -70,16 +71,15 @@
         "header": [
           { "key": "Content-Type", "value": "application/json" },
           { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}", "description": "Only needed if MCP_CLIENT_API_KEY is set on the server. Leave apiKey empty in dev." },
-          { "key": "x-actor-role", "value": "{{actorRole}}", "description": "Who the AI acts as: patient | doctor | receptionist | admin. MUST be set here on initialize — the server reads it once per session. Defaults to receptionist so staff + CRM tools appear. Set actorRole=patient to test least-privilege." }
+          { "key": "x-api-key", "value": "{{apiKey}}", "description": "Only needed if MCP_CLIENT_API_KEY is set on the server. Leave apiKey empty in dev." }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-06-18\",\n    \"capabilities\": {},\n    \"clientInfo\": { \"name\": \"postman\", \"version\": \"1.0.0\" }\n  }\n}",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-06-18\",\n    \"capabilities\": {},\n    \"clientInfo\": { \"name\": \"postman\", \"version\": \"1.0.0\" },\n    \"actorRole\": \"{{actorRole}}\"\n  }\n}",
           "options": { "raw": { "language": "json" } }
         },
         "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
-        "description": "Opens an MCP session. The response is SSE; the important part is the `Mcp-Session-Id` response header, captured automatically by the Tests script.\n\nThe `x-actor-role` header set here (from the `actorRole` variable) scopes the ENTIRE session's authorization — it is read once, at init, and cannot be changed per call. Re-run this request after changing `actorRole` to switch actor."
+        "description": "Opens an MCP session AND sets its role via `params.actorRole` (from the `actorRole` variable). This role scopes the whole session — both which tools `tools/list` returns and which `tools/call` may run. The response is SSE; the `Mcp-Session-Id` header is captured automatically by the Tests script. To change role, edit `actorRole` and re-run this request (a new session)."
       }
     },
     {
@@ -117,7 +117,7 @@
           "options": { "raw": { "language": "json" } }
         },
         "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
-        "description": "Lists all tools. Confirm each tool's inputSchema.properties now includes a `tenantId` field (24-char hex)."
+        "description": "Lists the tools available to THIS session's role (set at initialize). The list is FILTERED: with actorRole=patient you'll see ~10 tools (clinic/doctors, slots, book/reschedule/cancel, health); with a staff role you'll see the full set (statistics.*, crm.*, find_patient, list/get appointment). Re-run initialize after changing `actorRole` to see the list change."
       }
     },
     {

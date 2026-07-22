@@ -1,26 +1,27 @@
 import { errorResult } from './tool-response.util';
 import type { McpToolResult } from './tool-response.util';
-import type { ToolRequest } from './tenant.util';
 
 /**
  * Tool authorization for the MCP server.
  *
- * The caller's role is taken from the `x-actor-role` transport header, which the
- * trusted MCP client sets (e.g. a patient-facing bot sends `x-actor-role:
- * patient`, a front-desk assistant sends `receptionist`).
+ * The caller's role is chosen ONCE, at session start: the client passes
+ * `actorRole` in the `initialize` request's `params` (a patient-facing bot sends
+ * `actorRole: 'patient'`; a staff/back-office client sends `receptionist` /
+ * `doctor` / `admin`). The role is captured from that request
+ * (`ActorRoleCaptureGuard`) and applies to the WHOLE session — a session = one
+ * actor — so it scopes both `tools/list` (which tools are advertised) and
+ * `tools/call` (which tools may run).
  *
- * ⚠️ TIMING (stateful Streamable HTTP): @rekg/mcp-nest registers the tool
- * handlers ONCE, at session `initialize`, capturing that request. So the header
- * the tools see is the one on the **initialize / connection** request — NOT on
- * each `tools/call`. Set `x-actor-role` as a connection-level header; it is then
- * bound to the whole session (a session = one actor). A header sent only on an
- * individual `tools/call` is ignored — the session then uses `DEFAULT_ACTOR_ROLE`
- * (`admin`, full access). See docs/MCP_TOOL_AUTHORIZATION.md.
+ * ⚠️ TIMING (stateful Streamable HTTP): @rekog/mcp-nest captures the request at
+ * session `initialize` and reuses it for every later `tools/list` / `tools/call`.
+ * That's why the role must ride the `initialize` request — a value sent on a
+ * later `tools/call` is not seen. When no `actorRole` is supplied at init, the
+ * session falls back to `DEFAULT_ACTOR_ROLE` (`patient`, least privilege).
  *
- * SECURITY: the role is NEVER a tool argument. Tool arguments are produced by
- * the AI model, so a role argument could be self-elevated (`role: "admin"`).
- * Reading it from the transport header keeps the trust boundary at the client
- * (authenticated by `x-api-key`), not the model.
+ * SECURITY: the role is NOT a per-call tool argument. Tool arguments are produced
+ * by the AI model, so a role argument could be self-elevated (`role: "admin"`).
+ * The role comes from the client's `initialize` request (authenticated by
+ * `x-api-key`), which the model cannot influence.
  *
  * Roles/capabilities are inspired by the backend permission model but are
  * intentionally coarse — the MCP surface is small.
@@ -69,9 +70,9 @@ const STAFF: Capability[] = [
  * `appointment:read` (list every appointment in the tenant), or
  * `statistics:read` (tenant-wide analytics) — those expose other people's data.
  *
- * ⚠️ Self-scoping caveat: the header tells us the caller is a *patient*, not
- * *which* patient, so the MCP layer cannot enforce "your own record only". The
- * trusted client MUST constrain `patientId` (on book) and `appointmentId` (on
+ * ⚠️ Self-scoping caveat: the role says the caller is a *patient*, not *which*
+ * patient, so the MCP layer cannot enforce "your own record only". The trusted
+ * client MUST constrain `patientId` (on book) and `appointmentId` (on
  * reschedule/cancel) to the signed-in patient. See docs/MCP_TOOL_AUTHORIZATION.md.
  */
 export const ROLE_CAPABILITIES: Record<ActorRole, readonly Capability[]> = {
@@ -86,34 +87,37 @@ const isActorRole = (value: unknown): value is ActorRole =>
   (ACTOR_ROLES as readonly string[]).includes(value);
 
 /**
- * Role assumed when the client sends no `x-actor-role` header (or an
- * unrecognised value). `admin` = full access: a caller that doesn't identify
- * itself gets the complete tool surface, so a patient-facing client MUST send an
- * explicit `x-actor-role: patient` to restrict it. Change this constant to
- * adjust the fallback (e.g. back to `patient` for least-privilege/default-deny).
+ * Role assumed when the `initialize` request supplies no (or an unrecognised)
+ * `actorRole`. `patient` = least privilege / default-deny: a session that
+ * doesn't identify itself gets only patient-level access, so staff clients MUST
+ * pass an explicit `actorRole` (`receptionist` / `doctor` / `admin`) at init.
+ * Change this constant to adjust the fallback.
  */
-export const DEFAULT_ACTOR_ROLE: ActorRole = 'admin';
-
-const readHeader = (
-  request: ToolRequest | undefined,
-  name: string,
-): string | undefined => {
-  const value = request?.headers?.[name];
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value[0];
-  return undefined;
-};
+export const DEFAULT_ACTOR_ROLE: ActorRole = 'patient';
 
 /**
- * Resolve the caller's role from the `x-actor-role` header. A recognised value
- * is used as-is; an absent OR unrecognised value falls back to
- * `DEFAULT_ACTOR_ROLE` (currently `admin`), so the fallback is driven entirely
- * by that one constant.
+ * The name under which `ActorRoleCaptureGuard` stamps the resolved role onto the
+ * `initialize` request object (which mcp-nest reuses for the whole session).
  */
-export const resolveActorRole = (request?: ToolRequest): ActorRole => {
-  const raw = readHeader(request, 'x-actor-role')?.trim().toLowerCase();
-  if (raw && isActorRole(raw)) return raw;
-  return DEFAULT_ACTOR_ROLE;
+export const ACTOR_ROLE_REQUEST_KEY = 'mcpActorRole';
+
+/**
+ * The request slice the role resolver reads: the `actorRole` stamped on the
+ * (captured `initialize`) request by `ActorRoleCaptureGuard`.
+ */
+export type ActorRoleRequest =
+  | { [ACTOR_ROLE_REQUEST_KEY]?: unknown }
+  | undefined;
+
+/**
+ * Resolve the session's role from the request captured at `initialize`. A
+ * recognised value is used as-is; anything else (absent / unknown) falls back to
+ * `DEFAULT_ACTOR_ROLE`, so the fallback is driven entirely by that one constant.
+ */
+export const resolveActorRole = (request?: ActorRoleRequest): ActorRole => {
+  const raw = request?.[ACTOR_ROLE_REQUEST_KEY];
+  const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return isActorRole(normalized) ? normalized : DEFAULT_ACTOR_ROLE;
 };
 
 /** Whether a role holds a capability. */
@@ -121,20 +125,17 @@ export const roleCan = (role: ActorRole, capability: Capability): boolean =>
   ROLE_CAPABILITIES[role].includes(capability);
 
 /**
- * Authorization guard for a tool handler. Returns an error `McpToolResult` when
- * the caller's role lacks the capability, or `null` to proceed. Usage:
- *
- *   const denied = authorize(request, 'statistics:read');
- *   if (denied) return denied;
+ * Authorization check. Returns an error `McpToolResult` when the session's role
+ * lacks the capability, or `null` to proceed.
  */
 export const authorize = (
-  request: ToolRequest | undefined,
+  request: ActorRoleRequest,
   capability: Capability,
 ): McpToolResult | null => {
   const role = resolveActorRole(request);
   if (roleCan(role, capability)) return null;
   return errorResult(
     `Not authorized: the '${role}' role cannot perform '${capability}'. ` +
-      'This action requires elevated (staff) access.',
+      "This action requires staff access — connect with an explicit actorRole (e.g. 'receptionist') at initialize.",
   );
 };

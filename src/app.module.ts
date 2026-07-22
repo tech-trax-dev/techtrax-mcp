@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { McpModule, McpTransportType } from '@rekog/mcp-nest';
 import { LoggerModule } from 'nestjs-pino';
 import { BackendModule } from './common/backend/backend.module';
+import { ActorRoleCaptureGuard } from './common/mcp/actor-role-capture.guard';
 import { McpClientGuard } from './common/mcp/mcp-client.guard';
 import { ToolCapabilityGuard } from './common/mcp/tool-authorization.guard';
 import { Env } from './config/config.types';
@@ -54,16 +55,17 @@ import { ToolsModule } from './tools/tools.module';
         sessionIdGenerator: () => randomUUID(),
         statelessMode: false,
       },
-      // Inbound auth. The guard is a no-op when MCP_CLIENT_API_KEY is unset
-      // (local/dev); it enforces `x-api-key` once the key is configured, and
-      // env validation makes the key mandatory in production.
-      guards: [McpClientGuard],
+      // Guards run on every MCP POST (initialize / tools/list / tools/call):
+      //  - McpClientGuard: inbound `x-api-key` auth (no-op until the key is set).
+      //  - ActorRoleCaptureGuard: stamps the session's role from the initialize
+      //    request's `params.actorRole` so ToolCapabilityGuard can enforce it.
+      guards: [McpClientGuard, ActorRoleCaptureGuard],
     }),
 
     BackendModule,
     ToolsModule,
   ],
   controllers: [HealthController],
-  providers: [McpClientGuard, ToolCapabilityGuard],
+  providers: [McpClientGuard, ActorRoleCaptureGuard, ToolCapabilityGuard],
 })
 export class AppModule {}

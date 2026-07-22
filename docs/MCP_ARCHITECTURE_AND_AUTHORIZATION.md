@@ -37,31 +37,38 @@ Rules that make this work:
 > **Why:** when the app changes how doctors are listed, MCP inherits it for free.
 > One query, one place.
 
-### B. Role-based authorization (with `tools/list` filtering)
+### B. Role-based authorization (session-scoped `actorRole` from `initialize`)
 
-Every tool declares a **capability**; the caller has a **role** (from the
-`x-actor-role` header). A single guard enforces it in **both** places the MCP
-framework checks guards:
+Every tool declares a **capability**; the caller passes a **role** once, in the
+`initialize` request's `params.actorRole`, and it applies to the whole session.
+`ActorRoleCaptureGuard` captures the role at init; in stateful Streamable HTTP
+mcp-nest reuses that captured request for the session (**a session = one
+actor**). Because the session role is known upfront, both list and call are
+enforced:
 
-- **`tools/list`** — a session only *sees* tools its role can use.
-- **`tools/call`** — calling a disallowed tool is rejected; the backend is never hit.
+- **`tools/list`** — **filtered by role**; a session only sees the tools its role can use.
+- **`tools/call`** — calling a tool the session role lacks is rejected; the backend is never hit.
 
 Key files:
 
 | File | What it holds |
 | --- | --- |
 | [`common/mcp/authorization.util.ts`](../src/common/mcp/authorization.util.ts) | Roles, capabilities, the `ROLE_CAPABILITIES` policy map, `DEFAULT_ACTOR_ROLE`, `resolveActorRole()` |
-| [`common/mcp/tool-authorization.guard.ts`](../src/common/mcp/tool-authorization.guard.ts) | `ToolCapabilityGuard` + the `@RequireCapability(cap)` decorator |
+| [`common/mcp/actor-role-capture.guard.ts`](../src/common/mcp/actor-role-capture.guard.ts) | `ActorRoleCaptureGuard` — captures `params.actorRole` from the `initialize` request so it's available for the whole session |
+| [`common/mcp/tool-authorization.guard.ts`](../src/common/mcp/tool-authorization.guard.ts) | `ToolCapabilityGuard` (filters `tools/list` + enforces `tools/call` against the session role) and the `@RequireCapability(cap)` decorator that tags each tool with its capability |
 
 Security invariants (don't violate these):
 
-- **Role comes from the `x-actor-role` transport header, never a tool argument.**
-  Tool args are produced by the AI model, so a role arg could be self-elevated.
-- **Default is `admin`** (`DEFAULT_ACTOR_ROLE`) — full access / fail-open.
-  An absent or unknown role value resolves to `admin`, so a patient-facing
-  client MUST send an explicit `x-actor-role: patient` to restrict it.
-- **Stateful transport reads the header at `initialize`**, so the client sets
-  `x-actor-role` on the connection (a session = one actor), not per call.
+- **Role comes from the `initialize` request's `params.actorRole`**, set by the
+  trusted client before the model runs. The AI model never sees or influences it
+  (it's not a tool argument), so the model cannot self-elevate mid-session.
+- **Default is `patient`** (`DEFAULT_ACTOR_ROLE`) — least privilege / fail-closed.
+  An omitted or unknown role value resolves to `patient`, so a staff-facing
+  client MUST send an explicit staff role (`receptionist` / `doctor` / `admin`)
+  at init to reach staff tools.
+- **`tools/list` is filtered** — the session role is known from `initialize`, so
+  the catalog only advertises the tools that role can use; `tools/call` enforces
+  the same policy.
 
 ---
 
@@ -80,8 +87,8 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly Capability[]> = {
 ```
 
 - **Grant/revoke a capability for a role** → add/remove it from that role's array.
-  The change instantly affects both `tools/list` and `tools/call` for every tool
-  tagged with that capability.
+  The change instantly affects both the filtered `tools/list` and the `tools/call`
+  check for every tool tagged with that capability.
 - **Add a brand-new capability** → add the string to the `CAPABILITIES` array
   (and its `Capability` type updates automatically), add it to whichever roles
   should have it, then tag the relevant tools with `@RequireCapability('new:cap')`.
@@ -168,7 +175,8 @@ ids to the signed-in user.
 | Concern | File |
 | --- | --- |
 | Role/capability policy | `src/common/mcp/authorization.util.ts` |
-| The guard + `@RequireCapability` | `src/common/mcp/tool-authorization.guard.ts` |
+| Capture the role from `initialize` | `src/common/mcp/actor-role-capture.guard.ts` |
+| The capability guard + `@RequireCapability` | `src/common/mcp/tool-authorization.guard.ts` |
 | Tenant resolution | `src/common/mcp/tenant.util.ts` |
 | Tool result helpers | `src/common/mcp/tool-response.util.ts` |
 | Backend HTTP client | `src/common/backend/backend-http.service.ts` |

@@ -122,7 +122,11 @@ export class CrmTools {
   })
   @RequireCapability('lead:read')
   async getTeam(
-    args: { tenantId?: string; teamId: string; format?: OutputFormat },
+    args: {
+      tenantId?: string;
+      teamId: string;
+      format?: OutputFormat;
+    },
     _context: unknown,
     request?: ToolRequest,
   ): Promise<McpToolResult> {

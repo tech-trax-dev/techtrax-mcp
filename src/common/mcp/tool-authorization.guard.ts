@@ -8,22 +8,22 @@ import {
 import { Reflector } from '@nestjs/core';
 import { ToolGuards } from '@rekog/mcp-nest';
 import { resolveActorRole, roleCan } from './authorization.util';
-import type { Capability } from './authorization.util';
+import type { ActorRoleRequest, Capability } from './authorization.util';
 
 /**
  * Capability-based tool guard.
  *
  * @rekog/mcp-nest runs a tool's guards both when LISTING tools (to decide which
  * to advertise) and when CALLING one (to allow/deny). By attaching this guard —
- * via `@RequireCapability(...)` — every tool is:
- *   • hidden from `tools/list` for a role that lacks its capability, and
- *   • rejected on `tools/call` for that role.
+ * via `@RequireCapability(...)` — every tagged tool is:
+ *   • hidden from `tools/list` for a session whose role lacks its capability, and
+ *   • rejected on `tools/call` for that session.
  *
  * So a `patient` session only sees (and can call) the patient-allowed tools.
  *
- * The caller's role comes from the `x-actor-role` request header (see
- * authorization.util + docs/MCP_TOOL_AUTHORIZATION.md); the required capability
- * comes from the `@RequireCapability(...)` metadata on the tool method.
+ * The session's role is resolved from the request captured at `initialize`
+ * (stamped by `ActorRoleCaptureGuard`, read by `resolveActorRole`); the required
+ * capability comes from the `@RequireCapability(...)` metadata on the tool method.
  */
 
 export const CAPABILITY_METADATA_KEY = 'mcp:capability';
@@ -40,10 +40,8 @@ export class ToolCapabilityGuard implements CanActivate {
     // A tool with no declared capability is unrestricted.
     if (!capability) return true;
 
-    const request = context.switchToHttp().getRequest<{
-      headers?: Record<string, string | string[] | undefined>;
-    }>();
-    const role = resolveActorRole({ headers: request?.headers });
+    const request = context.switchToHttp().getRequest<ActorRoleRequest>();
+    const role = resolveActorRole(request);
     return roleCan(role, capability);
   }
 }

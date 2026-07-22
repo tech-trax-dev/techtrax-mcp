@@ -227,7 +227,11 @@ export class AppointmentTools {
   })
   @RequireCapability('appointment:read')
   async getAppointment(
-    args: { tenantId?: string; appointmentId: string; format?: OutputFormat },
+    args: {
+      tenantId?: string;
+      appointmentId: string;
+      format?: OutputFormat;
+    },
     _context: unknown,
     request?: ToolRequest,
   ): Promise<McpToolResult> {

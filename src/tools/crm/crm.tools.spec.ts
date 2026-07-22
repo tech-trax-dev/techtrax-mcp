@@ -110,7 +110,11 @@ describe('CrmTools', () => {
       backend.post.mockResolvedValue(leadPayload);
 
       const result = await tools.assignLead(
-        { tenantId: TENANT, leadId: 'lead1', assignedTo: 'u2' },
+        {
+          tenantId: TENANT,
+          leadId: 'lead1',
+          assignedTo: 'u2',
+        },
         undefined,
         req,
       );
@@ -156,7 +160,12 @@ describe('CrmTools', () => {
       backend.post.mockResolvedValue(leadPayload);
 
       await tools.assignLead(
-        { tenantId: TENANT, leadId: 'lead1', teamId: 't1', isRoundRobin: true },
+        {
+          tenantId: TENANT,
+          leadId: 'lead1',
+          teamId: 't1',
+          isRoundRobin: true,
+        },
         undefined,
         req,
       );
@@ -206,7 +215,11 @@ describe('CrmTools', () => {
         ),
       );
       const result = await tools.assignLead(
-        { tenantId: TENANT, leadId: 'lead1', assignedTo: 'bad' },
+        {
+          tenantId: TENANT,
+          leadId: 'lead1',
+          assignedTo: 'bad',
+        },
         undefined,
         req,
       );

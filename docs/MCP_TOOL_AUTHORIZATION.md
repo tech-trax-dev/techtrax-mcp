@@ -1,28 +1,33 @@
 # MCP Tool Authorization
 
-Every MCP tool call is scoped by **two request headers your client sets** (not the AI model):
+Every MCP tool call is scoped by two things your **client** supplies (not the AI model):
 
-| Header | Purpose | Example |
-| --- | --- | --- |
-| `x-tenant-id` | Which clinic to act on (24-char hex id) | `x-tenant-id: 6935b6ea…` |
-| `x-actor-role` | Who the AI is acting for | `x-actor-role: patient` |
+| Where | Name | Purpose | Example |
+| --- | --- | --- | --- |
+| Header | `x-tenant-id` | Which clinic to act on (24-char hex id) | `x-tenant-id: 6935b6ea…` |
+| `initialize` params | `actorRole` | Who the AI is acting for (whole session) | `"actorRole": "patient"` |
 
-> `x-api-key` still authenticates the client itself (unchanged).
+> `x-api-key` still authenticates the client itself (unchanged), and `x-tenant-id` still scopes the tenant (unchanged). `tenantId` is still a per-call tool argument (unchanged).
 
-## ⚠️ Where to put `x-actor-role` (read this first)
+## ⚠️ `actorRole` is set once in the `initialize` params (read this first)
 
-The server runs **stateful Streamable HTTP**, and the MCP framework reads request headers **once, when the session is created (`initialize`)** — not on each `tools/call`. So:
+The role travels in the **`params` of the JSON-RPC `initialize` request**, and it applies to the **whole session** — not per call, and not in a header. Allowed values: `patient` | `doctor` | `receptionist` | `admin`.
 
-- ✅ Set `x-actor-role` as a **connection-level header** so it rides on the `initialize` request. It then applies to the whole session. **A session = one actor.**
-- ❌ Setting `x-actor-role` on an individual `tools/call` **has no effect** — the tool still sees the `initialize` request's headers. The session then uses the default role (`admin`, full access), so a patient session won't be restricted unless the role rides on `initialize`.
+- ✅ Send `actorRole` in `initialize` `params`, once, when the session opens.
+- Omitted or unrecognised → `patient` (the least-privilege `DEFAULT_ACTOR_ROLE`), so a **staff-facing client MUST send an explicit staff role** (`receptionist` / `doctor` / `admin`) at init to unlock staff tools.
 
-**Testing with raw JSON-RPC (Postman/curl):** put the header on the `initialize` POST that starts the session (the one that returns `mcp-session-id`), then reuse that session for `tools/call`. Putting it only on the `tools/call` will not work — that's the usual "I set the header but it still ran" cause.
+```jsonc
+{ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+  "params": { "protocolVersion": "2025-06-18", "capabilities": {},
+              "clientInfo": { "name": "…", "version": "…" },
+              "actorRole": "receptionist" } }
+```
 
-Real MCP client libraries send connection-level headers on `initialize` automatically; set `x-actor-role` there alongside `x-api-key`. To switch actor, open a new session.
+A guard (`ActorRoleCaptureGuard`) captures `params.actorRole` at init; in stateful Streamable HTTP mcp-nest reuses that captured request for the whole session, so the role applies to every later `tools/list` and `tools/call`. **A session = one actor.** To act as a different role, open a **new session** with a different `actorRole`.
 
-## Why the role is a header, not a tool argument
+## Set a fixed role in a patient-facing client
 
-The AI model produces tool **arguments**, so a `role` argument could be faked (`role: "admin"`). The role therefore comes from the transport header, which only your trusted client can set. **Never** pass the role as a tool parameter.
+The AI model never sees or influences the role — it's fixed at `initialize` by your client, before the model runs. A patient-facing client can simply **omit `actorRole` or pass `patient`** at init; because the role is not a tool argument, the model cannot self-elevate (`actorRole: "admin"`) mid-session.
 
 ## Roles → what they can do
 
@@ -37,26 +42,26 @@ The AI model produces tool **arguments**, so a `role` argument could be faked (`
 | CRM: list teams + members | `crm.list_teams` / `crm.get_team` (`lead:read`) | ❌ | ✅ |
 | CRM: assign a lead | `crm.assign_lead` (`lead:write`) | ❌ | ✅ |
 
-Enforcement happens in two places automatically:
+The session role is known from `initialize`, so both list and call are enforced by the same per-tool capability + session role:
 
-- **`tools/list` is filtered** — a session only sees the tools its role can use. A `patient` session's tool list contains just the patient-allowed tools; `statistics.*`, `find_patient`, and `list_appointments` / `get_appointment` are omitted.
-- **`tools/call` is rejected** for a tool the role lacks (`Access denied: insufficient permissions for tool '…'`), and the backend is never called.
+- **`tools/list` is filtered.** A `patient` session's catalog **excludes** `statistics.*`, `crm.*`, `find_patient`, and `list_appointments` / `get_appointment` — the session only sees the tools its role can use.
+- **`tools/call` is rejected** for a tool the session role lacks (`Access denied: insufficient permissions for tool '<name>'`), and the backend is never called.
 
-Both are driven by the same per-tool capability, so the list and the call can't drift apart.
+A disallowed tool is both hidden from the list and rejected if called anyway.
 
 ## How to use it (per session)
 
-Set `x-actor-role` **on connect** (see the timing note above) based on who is talking to the AI:
+Set `actorRole` in the **`initialize` `params`** based on who is talking to the AI, once when the session opens:
 
-- **Patient chatbot** → `x-actor-role: patient`
-- **Front-desk / staff assistant** → `x-actor-role: receptionist` (or `doctor` / `admin`)
+- **Patient chatbot** → `"actorRole": "patient"` (or omit it)
+- **Front-desk / staff assistant** → `"actorRole": "receptionist"` (or `doctor` / `admin`)
 
-Behavior when the header is missing or wrong (fail-open to `admin`):
+Behavior when `actorRole` is missing or wrong (fail-**closed** to `patient`):
 
-- **Absent** → `admin` (the `DEFAULT_ACTOR_ROLE` constant in `src/common/mcp/authorization.util.ts`). Full access, so a **patient-facing client MUST send `x-actor-role: patient`** to restrict it.
-- **Unrecognised value** → also `admin`.
+- **Omitted** → `patient` (the `DEFAULT_ACTOR_ROLE` constant in `src/common/mcp/authorization.util.ts`). Least privilege, so a **staff-facing client MUST send an explicit staff role at init** to reach staff tools.
+- **Unrecognised value** → also `patient`.
 
-> ⚠️ This is fail-**open**: an unidentified caller gets the full tool surface. To make the default least-privilege instead, set `DEFAULT_ACTOR_ROLE = 'patient'`.
+> ⚠️ This is fail-**closed**: an unidentified caller gets only the patient tool surface. Change the fallback by editing `DEFAULT_ACTOR_ROLE`.
 
 ## ⚠️ Patient self-scoping (important)
 

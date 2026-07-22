@@ -65,16 +65,23 @@ All config is via environment variables, validated at boot
 | `TRUST_PROXY` | no | `false` | Set `true` behind a proxy/LB/ingress |
 | `LOG_LEVEL` | no | `info` | `fatal`…`trace` |
 
-## Authorization (per-call role)
+## Authorization (session-scoped role)
 
-Two request headers scope every call (both set by the trusted client, not the AI model):
+The tenant and the caller's role are both passed by the trusted client (not the AI model):
 
-- **`x-tenant-id`** — the clinic to act on.
-- **`x-actor-role`** — who the AI is acting for: `patient`, `doctor`, `receptionist`, or `admin`. Absent or unrecognised → `admin` (full access), the `DEFAULT_ACTOR_ROLE` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts), so a **patient-facing client MUST send `x-actor-role: patient`** to restrict it.
+- **`x-tenant-id`** header — the clinic to act on.
+- **`actorRole`** — who the AI is acting for: `patient`, `doctor`, `receptionist`, or `admin`. Passed **once**, in the JSON-RPC `initialize` request's `params`, and it applies to the **whole session**. A guard (`ActorRoleCaptureGuard`) captures `params.actorRole` at init; in stateful Streamable HTTP mcp-nest reuses that captured request for the session, so the role applies to every later `tools/list` and `tools/call`. **A session = one actor** — to act as a different role, open a new session. Omitted or unrecognised → `patient` (least privilege / fail-closed), the `DEFAULT_ACTOR_ROLE` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts), so a **staff-facing client MUST send an explicit `actorRole` (e.g. `receptionist`/`admin`) at init** to unlock staff tools.
 
-> ⚠️ **Set `x-actor-role` on the connection/`initialize` request**, not per `tools/call`. In stateful Streamable HTTP the framework reads headers once at session init, so a header on an individual call is ignored (the session's init role applies). A session = one actor. See [docs/MCP_TOOL_AUTHORIZATION.md](docs/MCP_TOOL_AUTHORIZATION.md).
+```jsonc
+{ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+  "params": { "protocolVersion": "2025-06-18", "capabilities": {},
+              "clientInfo": { "name": "…", "version": "…" },
+              "actorRole": "receptionist" } }
+```
 
-The role is **never** a tool argument — reading it from the transport prevents the model from self-elevating. Policy lives in [`src/common/mcp/authorization.util.ts`](src/common/mcp/authorization.util.ts) (`ROLE_CAPABILITIES`):
+> ⚠️ **`actorRole` is set once at `initialize` — not a per-call argument and not a header.** Because the role is fixed for the session, `tools/list` **is** filtered by role: a session only sees the tools its role can use (a `patient` session's list excludes `statistics.*`, `crm.*`, `appointment.find_patient`, `appointment.list_appointments`, `appointment.get_appointment`), and `tools/call` on a disallowed tool is rejected before any backend call. A **patient-facing client can omit `actorRole` or pass `patient`** so the model cannot widen its own access. See [docs/MCP_TOOL_AUTHORIZATION.md](docs/MCP_TOOL_AUTHORIZATION.md).
+
+Policy lives in [`src/common/mcp/authorization.util.ts`](src/common/mcp/authorization.util.ts) (`ROLE_CAPABILITIES`):
 
 | Capability | Tools | patient | doctor / receptionist / admin |
 | --- | --- | :---: | :---: |
@@ -87,9 +94,9 @@ The role is **never** a tool argument — reading it from the transport prevents
 | `lead:read` | `crm.list_teams` / `crm.get_team` | ❌ | ✅ |
 | `lead:write` | `crm.assign_lead` | ❌ | ✅ |
 
-Enforcement is automatic in both directions: tools a role can't use are **omitted from `tools/list`** for that session, and calling one anyway is **rejected** (no backend call). Patients get the self-service set — browse the clinic/doctors/specialties, check slots, and manage their own appointments (book/reschedule/cancel). They cannot search the patient directory, list every appointment in the tenant, or view analytics. Edit `ROLE_CAPABILITIES` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts) (and each tool's `@RequireCapability(...)`) to adjust.
+Enforcement is driven by the session role plus each tool's capability: `tools/list` **is filtered** so a session only sees the tools its role can use, and `tools/call` on a disallowed tool is rejected (`Access denied: insufficient permissions for tool '<name>'`) with the backend never hit. Patients get the self-service set — browse the clinic/doctors/specialties, check slots, and manage their own appointments (book/reschedule/cancel). They cannot search the patient directory, list every appointment in the tenant, or view analytics. Edit `ROLE_CAPABILITIES` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts) (and each tool's `@RequireCapability(...)`) to adjust.
 
-> ⚠️ **Self-scoping:** the header identifies the caller as a *patient*, not *which* patient, so the MCP layer cannot enforce "your own record only". A patient-facing client MUST constrain `patientId` (book) and `appointmentId` (reschedule/cancel) to the signed-in patient.
+> ⚠️ **Self-scoping:** `actorRole` identifies the caller as a *patient*, not *which* patient, so the MCP layer cannot enforce "your own record only". A patient-facing client MUST constrain `patientId` (book) and `appointmentId` (reschedule/cancel) to the signed-in patient.
 
 ## Scripts
 

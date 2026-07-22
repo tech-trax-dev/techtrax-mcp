@@ -10,7 +10,7 @@ three assignment methods the app's create-lead flow uses.
 
 It covers:
 
-1. Session setup (headers + role) — required before any CRM tool is visible.
+1. Session setup (headers + `actorRole` at `initialize`) — required before any CRM call succeeds.
 2. The three tools, the order to call them, and what each returns.
 3. The 3 assignment methods and how each maps to `crm.assign_lead` arguments.
 4. How "round-robin" is resolved (load-aware, same engine as create).
@@ -18,23 +18,33 @@ It covers:
 
 ---
 
-## 1. Session setup (headers — set ONCE, on connect)
+## 1. Session setup (headers + `actorRole` at `initialize`)
 
-Every CRM tool is scoped by request headers your **client** sets (never the AI
-model). The server reads them **once, at `initialize`** — a session = one actor.
+Every CRM call is scoped by request headers **and** the session's `actorRole`
+your **client** supplies at `initialize` (never the AI model).
 
-| Header | Purpose | Example |
-| --- | --- | --- |
-| `x-api-key` | Authenticates the client | `x-api-key: <MCP_CLIENT_API_KEY>` |
-| `x-tenant-id` | Which clinic/workspace to act on (24-hex id) | `x-tenant-id: 6935b6ea…` |
-| `x-actor-role` | Who the AI acts as — **must be staff for CRM** | `x-actor-role: receptionist` |
+| Where | Name | Purpose | Example |
+| --- | --- | --- | --- |
+| Header | `x-api-key` | Authenticates the client | `x-api-key: <MCP_CLIENT_API_KEY>` |
+| Header | `x-tenant-id` | Which clinic/workspace to act on (24-hex id) | `x-tenant-id: 6935b6ea…` |
+| `initialize` params | `actorRole` | Who the AI acts as (whole session) — **must be staff for CRM** | `"actorRole": "receptionist"` |
 
+- Pass `actorRole` **once**, in the `params` of the JSON-RPC `initialize`
+  request; it applies to the whole session (a session = one actor). It is **not**
+  a per-call argument and **not** a header. Allowed values: `patient` | `doctor`
+  | `receptionist` | `admin`.
+  ```jsonc
+  { "jsonrpc": "2.0", "id": 1, "method": "initialize",
+    "params": { "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": { "name": "…", "version": "…" },
+                "actorRole": "receptionist" } }
+  ```
 - The CRM tools require `lead:read` / `lead:write`, held by **`receptionist`,
-  `doctor`, `admin`**. The default role is `admin` (full access), so the CRM
-  tools are available unless the client restricts the session with an explicit
-  `x-actor-role: patient` — a `patient` session **won't even see** them.
-- Put `x-actor-role` on the **connection / `initialize`** request. Setting it on
-  an individual `tools/call` has no effect (the session keeps its init role).
+  `doctor`, `admin`**. The default role is `patient` (omitted/unknown →
+  `patient`), so you **must** open the session with a staff role to use the CRM
+  tools — a `patient` session is **rejected**. And because `tools/list` is
+  filtered by the session role, a `patient` session won't even **see** the CRM
+  tools in the catalog.
 
 See `docs/MCP_TOOL_AUTHORIZATION.md` for the full authorization model.
 
@@ -153,6 +163,11 @@ lead creation** (single source of truth):
 ---
 
 ## 5. End-to-end examples (JSON-RPC `tools/call`)
+
+> The session was opened with a staff `actorRole` (e.g. `receptionist`) at
+> `initialize`, so the role is **not** repeated in these `tools/call` arguments.
+> Open the session as `patient` (or omit `actorRole`) and these CRM tools are
+> hidden from `tools/list` and rejected on call.
 
 ```jsonc
 // 1. Pick a team by reading descriptions
