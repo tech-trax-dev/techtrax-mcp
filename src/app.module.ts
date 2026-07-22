@@ -5,6 +5,7 @@ import { McpModule, McpTransportType } from '@rekog/mcp-nest';
 import { LoggerModule } from 'nestjs-pino';
 import { BackendModule } from './common/backend/backend.module';
 import { McpClientGuard } from './common/mcp/mcp-client.guard';
+import { ToolCapabilityGuard } from './common/mcp/tool-authorization.guard';
 import { Env } from './config/config.types';
 import { validateEnv } from './config/env.validation';
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from './config/mcp.constants';
@@ -63,6 +64,6 @@ import { ToolsModule } from './tools/tools.module';
     ToolsModule,
   ],
   controllers: [HealthController],
-  providers: [McpClientGuard],
+  providers: [McpClientGuard, ToolCapabilityGuard],
 })
 export class AppModule {}

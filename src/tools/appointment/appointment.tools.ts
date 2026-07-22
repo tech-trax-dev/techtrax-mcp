@@ -10,6 +10,7 @@ import {
   tenantIdParam,
 } from '../../common/mcp/tenant.util';
 import type { ToolRequest } from '../../common/mcp/tenant.util';
+import { RequireCapability } from '../../common/mcp/tool-authorization.guard';
 import {
   AppointmentOutputSchema,
   AppointmentsListOutputSchema,
@@ -73,6 +74,7 @@ export class AppointmentTools {
     outputSchema: PatientsListOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('patient:read')
   async findPatient(
     args: {
       tenantId?: string;
@@ -118,6 +120,7 @@ export class AppointmentTools {
     outputSchema: AvailableSlotsOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('slots:read')
   async getAvailableSlots(
     args: {
       tenantId?: string;
@@ -168,6 +171,7 @@ export class AppointmentTools {
     outputSchema: AppointmentsListOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('appointment:read')
   async listAppointments(
     args: {
       tenantId?: string;
@@ -221,6 +225,7 @@ export class AppointmentTools {
     outputSchema: AppointmentOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('appointment:read')
   async getAppointment(
     args: { tenantId?: string; appointmentId: string; format?: OutputFormat },
     _context: unknown,
@@ -272,6 +277,7 @@ export class AppointmentTools {
     outputSchema: AppointmentOutputSchema,
     annotations: WRITE_ANNOTATIONS,
   })
+  @RequireCapability('appointment:write')
   async book(
     args: {
       tenantId?: string;
@@ -329,6 +335,7 @@ export class AppointmentTools {
     outputSchema: AppointmentOutputSchema,
     annotations: WRITE_ANNOTATIONS,
   })
+  @RequireCapability('appointment:write')
   async reschedule(
     args: {
       tenantId?: string;
@@ -380,6 +387,7 @@ export class AppointmentTools {
     outputSchema: AppointmentOutputSchema,
     annotations: DESTRUCTIVE_ANNOTATIONS,
   })
+  @RequireCapability('appointment:write')
   async cancel(
     args: {
       tenantId?: string;

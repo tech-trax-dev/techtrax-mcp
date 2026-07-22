@@ -10,6 +10,7 @@ import {
   tenantIdParam,
 } from '../../common/mcp/tenant.util';
 import type { ToolRequest } from '../../common/mcp/tenant.util';
+import { RequireCapability } from '../../common/mcp/tool-authorization.guard';
 import {
   AppointmentSummaryOutputSchema,
   CancellationStatsOutputSchema,
@@ -85,6 +86,7 @@ export class StatisticsTools {
     outputSchema: AppointmentSummaryOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('statistics:read')
   async getAppointmentSummary(
     args: RangeArgs,
     _context: unknown,
@@ -107,6 +109,7 @@ export class StatisticsTools {
     outputSchema: CancellationStatsOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('statistics:read')
   async getCancellationStats(
     args: RangeArgs,
     _context: unknown,
@@ -129,6 +132,7 @@ export class StatisticsTools {
     outputSchema: PatientSummaryOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('statistics:read')
   async getPatientSummary(
     args: RangeArgs,
     _context: unknown,
@@ -151,6 +155,7 @@ export class StatisticsTools {
     outputSchema: DoctorPerformanceOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('statistics:read')
   async getDoctorPerformance(
     args: RangeArgs,
     _context: unknown,
@@ -173,6 +178,7 @@ export class StatisticsTools {
     outputSchema: FinancialSummaryOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('statistics:read')
   async getFinancialSummary(
     args: RangeArgs,
     _context: unknown,
@@ -195,6 +201,7 @@ export class StatisticsTools {
     outputSchema: OperationalStatsOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('statistics:read')
   async getOperationalStats(
     args: RangeArgs,
     _context: unknown,
@@ -217,6 +224,7 @@ export class StatisticsTools {
     outputSchema: ServiceStatsOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('statistics:read')
   async getServiceStats(
     args: RangeArgs,
     _context: unknown,
@@ -239,6 +247,7 @@ export class StatisticsTools {
     outputSchema: GrowthTrendsOutputSchema,
     annotations: READ_ANNOTATIONS,
   })
+  @RequireCapability('statistics:read')
   async getGrowthTrends(
     args: RangeArgs,
     _context: unknown,

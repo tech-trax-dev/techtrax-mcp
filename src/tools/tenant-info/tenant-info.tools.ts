@@ -10,6 +10,7 @@ import {
   tenantIdParam,
 } from '../../common/mcp/tenant.util';
 import type { ToolRequest } from '../../common/mcp/tenant.util';
+import { RequireCapability } from '../../common/mcp/tool-authorization.guard';
 import {
   ClinicProfileOutputSchema,
   DoctorAvailabilityOutputSchema,
@@ -49,6 +50,7 @@ export class TenantInfoTools {
     outputSchema: ClinicProfileOutputSchema,
     annotations: TOOL_ANNOTATIONS,
   })
+  @RequireCapability('clinic:read')
   async getClinicProfile(
     args: { tenantId?: string; format?: OutputFormat },
     // Context is currently unused but kept in signature for parity with MCP handler contract.
@@ -99,6 +101,7 @@ export class TenantInfoTools {
     outputSchema: DoctorsListOutputSchema,
     annotations: TOOL_ANNOTATIONS,
   })
+  @RequireCapability('clinic:read')
   async listDoctors(
     args: {
       tenantId?: string;
@@ -155,6 +158,7 @@ export class TenantInfoTools {
     outputSchema: DoctorProfileOutputSchema,
     annotations: TOOL_ANNOTATIONS,
   })
+  @RequireCapability('clinic:read')
   async getDoctorProfile(
     args: { tenantId?: string; doctorId: string; format?: OutputFormat },
     _context: unknown,
@@ -196,6 +200,7 @@ export class TenantInfoTools {
     outputSchema: DoctorAvailabilityOutputSchema,
     annotations: TOOL_ANNOTATIONS,
   })
+  @RequireCapability('clinic:read')
   async getDoctorAvailability(
     args: { tenantId?: string; doctorId: string; format?: OutputFormat },
     _context: unknown,

@@ -65,6 +65,32 @@ All config is via environment variables, validated at boot
 | `TRUST_PROXY` | no | `false` | Set `true` behind a proxy/LB/ingress |
 | `LOG_LEVEL` | no | `info` | `fatal`…`trace` |
 
+## Authorization (per-call role)
+
+Two request headers scope every call (both set by the trusted client, not the AI model):
+
+- **`x-tenant-id`** — the clinic to act on.
+- **`x-actor-role`** — who the AI is acting for: `patient`, `doctor`, `receptionist`, or `admin`. Absent or unrecognised → `admin` (full access), the `DEFAULT_ACTOR_ROLE` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts), so a **patient-facing client MUST send `x-actor-role: patient`** to restrict it.
+
+> ⚠️ **Set `x-actor-role` on the connection/`initialize` request**, not per `tools/call`. In stateful Streamable HTTP the framework reads headers once at session init, so a header on an individual call is ignored (the session's init role applies). A session = one actor. See [docs/MCP_TOOL_AUTHORIZATION.md](docs/MCP_TOOL_AUTHORIZATION.md).
+
+The role is **never** a tool argument — reading it from the transport prevents the model from self-elevating. Policy lives in [`src/common/mcp/authorization.util.ts`](src/common/mcp/authorization.util.ts) (`ROLE_CAPABILITIES`):
+
+| Capability | Tools | patient | doctor / receptionist / admin |
+| --- | --- | :---: | :---: |
+| `clinic:read` | `tenant_info.*` (clinic, doctor directory, specialties) | ✅ | ✅ |
+| `slots:read` | `appointment.get_available_slots` | ✅ | ✅ |
+| `appointment:write` | `appointment.book` / `reschedule` / `cancel` | ✅ | ✅ |
+| `patient:read` | `appointment.find_patient` | ❌ | ✅ |
+| `appointment:read` | `appointment.list_appointments` / `get_appointment` | ❌ | ✅ |
+| `statistics:read` | `statistics.*` | ❌ | ✅ |
+| `lead:read` | `crm.list_teams` / `crm.get_team` | ❌ | ✅ |
+| `lead:write` | `crm.assign_lead` | ❌ | ✅ |
+
+Enforcement is automatic in both directions: tools a role can't use are **omitted from `tools/list`** for that session, and calling one anyway is **rejected** (no backend call). Patients get the self-service set — browse the clinic/doctors/specialties, check slots, and manage their own appointments (book/reschedule/cancel). They cannot search the patient directory, list every appointment in the tenant, or view analytics. Edit `ROLE_CAPABILITIES` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts) (and each tool's `@RequireCapability(...)`) to adjust.
+
+> ⚠️ **Self-scoping:** the header identifies the caller as a *patient*, not *which* patient, so the MCP layer cannot enforce "your own record only". A patient-facing client MUST constrain `patientId` (book) and `appointmentId` (reschedule/cancel) to the signed-in patient.
+
 ## Scripts
 
 | Command | Purpose |
@@ -92,6 +118,10 @@ Adding a namespace = new folder + module + one import line in
 👉 **Adding or extending a tool?** Follow the step-by-step guide with conventions,
 a full worked example, and a pre-merge checklist:
 **[docs/ADDING_A_TOOL.md](docs/ADDING_A_TOOL.md)**.
+
+👉 **Assigning CRM leads with the AI?** The `crm.*` tools + the three assignment
+methods (specific person / team lead / round-robin) are documented in
+**[docs/AI-LEAD-ASSIGNMENT.md](docs/AI-LEAD-ASSIGNMENT.md)**.
 
 ## Testing
 

@@ -3,6 +3,7 @@ import { HealthToolsModule } from './health/health.module';
 import { TenantInfoToolsModule } from './tenant-info/tenant-info.module';
 import { AppointmentToolsModule } from './appointment/appointment.module';
 import { StatisticsToolsModule } from './statistics/statistics.module';
+import { CrmToolsModule } from './crm/crm.module';
 
 /**
  * Thin barrel that aggregates every tool namespace. Adding a namespace = new
@@ -14,6 +15,7 @@ import { StatisticsToolsModule } from './statistics/statistics.module';
     TenantInfoToolsModule,
     AppointmentToolsModule,
     StatisticsToolsModule,
+    CrmToolsModule,
   ],
 })
 export class ToolsModule {}

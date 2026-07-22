@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "TechTrax MCP",
-    "description": "Manual testing for the TechTrax MCP server (Streamable HTTP, stateful).\n\nFlow: run the requests top to bottom.\n1. `initialize` captures the `Mcp-Session-Id` header into the `sessionId` collection variable (see its Tests tab).\n2. `notifications/initialized` completes the handshake.\n3. `tools/list` shows the catalog — confirm every tool now has a `tenantId` param.\n4. `tools/call` requests pass `tenantId` in `arguments`.\n\nEdit collection variables (baseUrl, tenantId, apiKey) under the collection's Variables tab.\n\nNote: responses come back as SSE (`text/event-stream`) by default. The body shows a `data: {...}` line. To get plain JSON instead, set `enableJsonResponse: true` in `src/app.module.ts` (dev only).\n\nSee docs/MANUAL_TESTING.md for the full guide.",
+    "description": "Manual testing for the TechTrax MCP server (Streamable HTTP, stateful).\n\nFlow: run the requests top to bottom.\n1. `initialize` captures the `Mcp-Session-Id` header into the `sessionId` collection variable (see its Tests tab).\n2. `notifications/initialized` completes the handshake.\n3. `tools/list` shows the catalog — confirm every tool now has a `tenantId` param.\n4. `tools/call` requests pass `tenantId` in `arguments`.\n\n⚠️ Authorization / `x-actor-role`: this server reads request headers ONCE, on `initialize`. The `x-actor-role` header therefore belongs on the `initialize` request only (it is set there via the `actorRole` variable) and applies to the whole session — putting it on a `tools/call` has no effect. `actorRole` defaults to `receptionist` so the staff + CRM tools show up. Set it to `patient` (least privilege) and re-run `initialize` to see the CRM/statistics/patient tools disappear from `tools/list` and get rejected on call. A session = one actor; to switch role, re-run `initialize`.\n\nEdit collection variables (baseUrl, tenantId, apiKey, actorRole, leadId, assigneeId) under the collection's Variables tab.\n\nNote: responses come back as SSE (`text/event-stream`) by default. The body shows a `data: {...}` line. To get plain JSON instead, set `enableJsonResponse: true` in `src/app.module.ts` (dev only).\n\nSee docs/MANUAL_TESTING.md and docs/MCP_TOOL_AUTHORIZATION.md for the full guide.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -17,6 +17,21 @@
     },
     {
       "key": "apiKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "actorRole",
+      "value": "receptionist",
+      "type": "string"
+    },
+    {
+      "key": "leadId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "assigneeId",
       "value": "",
       "type": "string"
     },
@@ -55,7 +70,8 @@
         "header": [
           { "key": "Content-Type", "value": "application/json" },
           { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}", "description": "Only needed if MCP_CLIENT_API_KEY is set on the server. Leave apiKey empty in dev." }
+          { "key": "x-api-key", "value": "{{apiKey}}", "description": "Only needed if MCP_CLIENT_API_KEY is set on the server. Leave apiKey empty in dev." },
+          { "key": "x-actor-role", "value": "{{actorRole}}", "description": "Who the AI acts as: patient | doctor | receptionist | admin. MUST be set here on initialize — the server reads it once per session. Defaults to receptionist so staff + CRM tools appear. Set actorRole=patient to test least-privilege." }
         ],
         "body": {
           "mode": "raw",
@@ -63,7 +79,7 @@
           "options": { "raw": { "language": "json" } }
         },
         "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
-        "description": "Opens an MCP session. The response is SSE; the important part is the `Mcp-Session-Id` response header, captured automatically by the Tests script."
+        "description": "Opens an MCP session. The response is SSE; the important part is the `Mcp-Session-Id` response header, captured automatically by the Tests script.\n\nThe `x-actor-role` header set here (from the `actorRole` variable) scopes the ENTIRE session's authorization — it is read once, at init, and cannot be changed per call. Re-run this request after changing `actorRole` to switch actor."
       }
     },
     {
@@ -158,7 +174,102 @@
           "options": { "raw": { "language": "json" } }
         },
         "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
-        "description": "Statistics tool with tenantId + date range in arguments."
+        "description": "Statistics tool with tenantId + date range in arguments. Staff-only (statistics:read) — appears/runs only when actorRole is doctor/receptionist/admin."
+      }
+    },
+    {
+      "name": "4d. tools/call - crm.list_teams (step 1 of lead assignment)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 9,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.list_teams\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"format\": \"markdown\"\n    }\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "CRM (lead:read, staff-only). Lists teams with name + description so the AI can pick the right team for a lead. Copy a team `id` from the result into the `crm.get_team` call. Requires actorRole = receptionist/doctor/admin (a patient session won't see this tool)."
+      }
+    },
+    {
+      "name": "4e. tools/call - crm.get_team (step 2: members)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 10,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.get_team\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"teamId\": \"PUT_A_TEAM_ID_HERE\",\n      \"format\": \"markdown\"\n    }\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "CRM (lead:read, staff-only). Returns the team's teamLead + members (id, name, role). Pick the owner's id (teamLead._id or a members[]._id) to use as `assignedTo` in crm.assign_lead. Replace PUT_A_TEAM_ID_HERE with an id from crm.list_teams."
+      }
+    },
+    {
+      "name": "4f. tools/call - crm.assign_lead (method 1: specific member)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 11,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.assign_lead\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"leadId\": \"{{leadId}}\",\n      \"assignedTo\": \"{{assigneeId}}\"\n    }\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "CRM (lead:write, staff-only) — WRITE. Method 1 of 3: reassign an EXISTING lead (leadId) to a SPECIFIC user (assignedTo, from crm.get_team). Backend rejects an assignee who isn't an active, non-admin member. Set the `leadId` and `assigneeId` collection variables first. Re-owns the lead + notifies — run against a scratch tenant."
+      }
+    },
+    {
+      "name": "4g. tools/call - crm.assign_lead (method 2: team lead)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 12,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.assign_lead\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"leadId\": \"{{leadId}}\",\n      \"teamId\": \"PUT_A_TEAM_ID_HERE\"\n    }\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "CRM (lead:write) — WRITE. Method 2 of 3: pass `teamId` only (no assignedTo, no isRoundRobin) → the lead goes to that team's designated team lead. Replace PUT_A_TEAM_ID_HERE with an id from crm.list_teams."
+      }
+    },
+    {
+      "name": "4h. tools/call - crm.assign_lead (method 3: round-robin)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json, text/event-stream" },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 13,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.assign_lead\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"leadId\": \"{{leadId}}\",\n      \"teamId\": \"PUT_A_TEAM_ID_HERE\",\n      \"isRoundRobin\": true\n    }\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "description": "CRM (lead:write) — WRITE. Method 3 of 3: `teamId` + `isRoundRobin:true` → auto-distribute across the team's MEMBERS (team lead excluded), load-aware (fewest open leads first). No specific person needed. `assignedTo` + `isRoundRobin` together is rejected. Replace PUT_A_TEAM_ID_HERE with an id from crm.list_teams."
       }
     },
     {
