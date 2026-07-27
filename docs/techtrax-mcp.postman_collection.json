@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "TechTrax MCP",
-    "description": "Manual testing for the TechTrax MCP server (Streamable HTTP, stateful).\n\nFlow: run the requests top to bottom.\n1. `initialize` sets the session's role and captures the `Mcp-Session-Id` header into the `sessionId` collection variable (see its Tests tab).\n2. `notifications/initialized` completes the handshake.\n3. `tools/list` shows the catalog — the list is FILTERED by the session role.\n4. `tools/call` requests pass `tenantId` in `arguments`.\n\n⚠️ Authorization / `actorRole`: the caller's role is set ONCE, in the `initialize` request's `params.actorRole` (NOT a header, NOT a per-call argument). It applies to the WHOLE session — a session = one actor. Allowed values: patient | doctor | receptionist | admin. Omitted/unknown → `patient` (least privilege). The `actorRole` collection variable (default `receptionist`) is substituted into the initialize params. Because the role is session-scoped, `tools/list` is FILTERED: a `patient` session only SEES patient-allowed tools (statistics.*, crm.*, find_patient, list/get appointment are hidden), and calling a disallowed tool is rejected. To switch role: change `actorRole` and re-run `initialize` (new session).\n\nEdit collection variables (baseUrl, tenantId, apiKey, actorRole, leadId, assigneeId) under the collection's Variables tab.\n\nNote: responses come back as SSE (`text/event-stream`) by default. The body shows a `data: {...}` line. To get plain JSON instead, set `enableJsonResponse: true` in `src/app.module.ts` (dev only).\n\nSee docs/MANUAL_TESTING.md and docs/MCP_TOOL_AUTHORIZATION.md for the full guide.",
+    "description": "Manual testing for the TechTrax MCP server (Streamable HTTP, stateful).\n\nFlow: run the requests top to bottom.\n1. `initialize` captures the `Mcp-Session-Id` header into the `sessionId` collection variable (see its Tests tab).\n2. `notifications/initialized` completes the handshake.\n3. `tools/list` shows the catalog (NOT role-filtered — every tool is always listed).\n4. `tools/call` requests pass `tenantId` AND `actorRole` in `arguments`.\n\n⚠️ Authorization / `actorRole`: the caller role is a PER-CALL tool ARGUMENT (like `tenantId`), passed in each tools/call `arguments` — NOT a header, NOT set at initialize. Values: patient | doctor | receptionist | admin. Omitted/unknown → patient (least privilege). The `actorRole` variable (default receptionist) is substituted into each tool-call. tools/list is NOT filtered by role; calling a tool your role lacks returns a Not-authorized result and never hits the backend. Set actorRole=patient to watch staff/CRM CALLS get rejected.\n\n🔎 Discover which role can call which tool via the plain HTTP endpoint: GET {{baseUrl}}/tool-access (full matrix) or GET {{baseUrl}}/tool-access?role=patient (see request 7).\n\nEdit collection variables (baseUrl, tenantId, apiKey, actorRole, leadId, assigneeId) under the collection Variables tab.\n\nNote: responses come back as SSE (text/event-stream) by default. To get plain JSON, set enableJsonResponse: true in src/app.module.ts (dev only).\n\nSee docs/MANUAL_TESTING.md and docs/MCP_TOOL_AUTHORIZATION.md for the full guide.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -24,7 +24,7 @@
       "key": "actorRole",
       "value": "receptionist",
       "type": "string",
-      "description": "Session role, sent in the initialize request's params.actorRole: patient | doctor | receptionist | admin. Omitted/unknown → patient (least privilege). Default receptionist here so staff + CRM tools are visible/usable; set to patient and re-run initialize to see tools/list filtered down to the patient set."
+      "description": "Caller role, passed as the actorRole argument in each tools/call arguments: patient | doctor | receptionist | admin. Omitted/unknown → patient (least privilege). Default receptionist so staff + CRM calls are authorized; set to patient to see staff/CRM calls rejected."
     },
     {
       "key": "leadId",
@@ -69,17 +69,39 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}", "description": "Only needed if MCP_CLIENT_API_KEY is set on the server. Leave apiKey empty in dev." }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}",
+            "description": "Only needed if MCP_CLIENT_API_KEY is set on the server. Leave apiKey empty in dev."
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-06-18\",\n    \"capabilities\": {},\n    \"clientInfo\": { \"name\": \"postman\", \"version\": \"1.0.0\" },\n    \"actorRole\": \"{{actorRole}}\"\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-06-18\",\n    \"capabilities\": {},\n    \"clientInfo\": { \"name\": \"postman\", \"version\": \"1.0.0\" }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
-        "description": "Opens an MCP session AND sets its role via `params.actorRole` (from the `actorRole` variable). This role scopes the whole session — both which tools `tools/list` returns and which `tools/call` may run. The response is SSE; the `Mcp-Session-Id` header is captured automatically by the Tests script. To change role, edit `actorRole` and re-run this request (a new session)."
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "description": "Opens an MCP session. The response is SSE; the important part is the `Mcp-Session-Id` response header, captured automatically by the Tests script.\n\nAuthorization note: the role is NOT set here — it's a per-call `actorRole` argument passed in each tools/call's `arguments` (see the tools/call requests). Use `GET /tool-access` to see which role can call which tool."
       }
     },
     {
@@ -87,17 +109,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"notifications/initialized\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "Completes the MCP handshake. Expect 202 Accepted with an empty body."
       }
     },
@@ -106,18 +152,42 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 2,\n  \"method\": \"tools/list\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
-        "description": "Lists the tools available to THIS session's role (set at initialize). The list is FILTERED: with actorRole=patient you'll see ~10 tools (clinic/doctors, slots, book/reschedule/cancel, health); with a staff role you'll see the full set (statistics.*, crm.*, find_patient, list/get appointment). Re-run initialize after changing `actorRole` to see the list change."
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "description": "Lists ALL tools (the list is NOT filtered by role — the role is a per-call argument, unknown at list time). Authorization is enforced per call: use GET /tool-access to see which role may call which tool."
       }
     },
     {
@@ -125,17 +195,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 3,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"specialty\": \"cardiology\"\n    }\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 3,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"actorRole\": \"{{actorRole}}\",\n      \"specialty\": \"cardiology\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "Passes tenantId as a tool argument. With a valid 24-hex tenantId and the backend up, returns real doctor data."
       }
     },
@@ -144,17 +238,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 4,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.get_clinic_profile\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"format\": \"markdown\"\n    }\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 4,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.get_clinic_profile\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"actorRole\": \"{{actorRole}}\",\n      \"format\": \"markdown\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "Clinic profile in markdown format."
       }
     },
@@ -163,17 +281,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 5,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"statistics.get_appointment_summary\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"from\": \"2026-07-01\",\n      \"to\": \"2026-07-07\"\n    }\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 5,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"statistics.get_appointment_summary\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"actorRole\": \"{{actorRole}}\",\n      \"from\": \"2026-07-01\",\n      \"to\": \"2026-07-07\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "Statistics tool with tenantId + date range in arguments. Staff-only (statistics:read) — appears/runs only when actorRole is doctor/receptionist/admin."
       }
     },
@@ -182,17 +324,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 9,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.list_teams\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"format\": \"markdown\"\n    }\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 9,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.list_teams\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"actorRole\": \"{{actorRole}}\",\n      \"format\": \"markdown\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "CRM (lead:read, staff-only). Lists teams with name + description so the AI can pick the right team for a lead. Copy a team `id` from the result into the `crm.get_team` call. Requires actorRole = receptionist/doctor/admin (a patient session won't see this tool)."
       }
     },
@@ -201,17 +367,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 10,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.get_team\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"teamId\": \"PUT_A_TEAM_ID_HERE\",\n      \"format\": \"markdown\"\n    }\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 10,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.get_team\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"actorRole\": \"{{actorRole}}\",\n      \"teamId\": \"PUT_A_TEAM_ID_HERE\",\n      \"format\": \"markdown\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "CRM (lead:read, staff-only). Returns the team's teamLead + members (id, name, role). Pick the owner's id (teamLead._id or a members[]._id) to use as `assignedTo` in crm.assign_lead. Replace PUT_A_TEAM_ID_HERE with an id from crm.list_teams."
       }
     },
@@ -220,17 +410,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 11,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.assign_lead\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"leadId\": \"{{leadId}}\",\n      \"assignedTo\": \"{{assigneeId}}\"\n    }\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 11,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.assign_lead\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"actorRole\": \"{{actorRole}}\",\n      \"leadId\": \"{{leadId}}\",\n      \"assignedTo\": \"{{assigneeId}}\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "CRM (lead:write, staff-only) — WRITE. Method 1 of 3: reassign an EXISTING lead (leadId) to a SPECIFIC user (assignedTo, from crm.get_team). Backend rejects an assignee who isn't an active, non-admin member. Set the `leadId` and `assigneeId` collection variables first. Re-owns the lead + notifies — run against a scratch tenant."
       }
     },
@@ -239,17 +453,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 12,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.assign_lead\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"leadId\": \"{{leadId}}\",\n      \"teamId\": \"PUT_A_TEAM_ID_HERE\"\n    }\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 12,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.assign_lead\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"actorRole\": \"{{actorRole}}\",\n      \"leadId\": \"{{leadId}}\",\n      \"teamId\": \"PUT_A_TEAM_ID_HERE\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "CRM (lead:write) — WRITE. Method 2 of 3: pass `teamId` only (no assignedTo, no isRoundRobin) → the lead goes to that team's designated team lead. Replace PUT_A_TEAM_ID_HERE with an id from crm.list_teams."
       }
     },
@@ -258,17 +496,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 13,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.assign_lead\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"leadId\": \"{{leadId}}\",\n      \"teamId\": \"PUT_A_TEAM_ID_HERE\",\n      \"isRoundRobin\": true\n    }\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 13,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.assign_lead\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"actorRole\": \"{{actorRole}}\",\n      \"leadId\": \"{{leadId}}\",\n      \"teamId\": \"PUT_A_TEAM_ID_HERE\",\n      \"isRoundRobin\": true\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "CRM (lead:write) — WRITE. Method 3 of 3: `teamId` + `isRoundRobin:true` → auto-distribute across the team's MEMBERS (team lead excluded), load-aware (fewest open leads first). No specific person needed. `assignedTo` + `isRoundRobin` together is rejected. Replace PUT_A_TEAM_ID_HERE with an id from crm.list_teams."
       }
     },
@@ -277,17 +539,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 6,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {}\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 6,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {\n      \"actorRole\": \"{{actorRole}}\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "No tenantId argument and no x-tenant-id header. Expect isError:true with 'Tenant context is missing...'."
       }
     },
@@ -296,17 +582,41 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 7,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {\n      \"tenantId\": \"abc\"\n    }\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 7,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {\n      \"tenantId\": \"abc\",\n      \"actorRole\": \"{{actorRole}}\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "Malformed tenantId. Expect a JSON-RPC validation error: 'tenantId must be a 24-character hex id (MongoDB ObjectId)'."
       }
     },
@@ -315,19 +625,87 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json, text/event-stream" },
-          { "key": "x-api-key", "value": "{{apiKey}}" },
-          { "key": "Mcp-Session-Id", "value": "{{sessionId}}" },
-          { "key": "x-tenant-id", "value": "{{tenantId}}" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          },
+          {
+            "key": "x-tenant-id",
+            "value": "{{tenantId}}"
+          }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 8,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {}\n  }\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 8,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"tenant_info.list_doctors\",\n    \"arguments\": {\n      \"actorRole\": \"{{actorRole}}\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
-        "url": { "raw": "{{baseUrl}}/mcp", "host": ["{{baseUrl}}"], "path": ["mcp"] },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
         "description": "Backward-compat check: no tenantId argument, tenant supplied via the x-tenant-id header instead. Should still resolve and return data."
+      }
+    },
+    {
+      "name": "7a. GET /tool-access (full role→tool matrix)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/tool-access",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "tool-access"
+          ],
+          "query": []
+        },
+        "description": "Plain HTTP (no MCP session needed). Returns { roles, capabilitiesByRole, tools:[{name,capability,allowedRoles}], toolsByRole }. Use this to discover which role can call which tool — tools/list is NOT role-filtered."
+      }
+    },
+    {
+      "name": "7b. GET /tool-access?role=patient (one role)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/tool-access?role=patient",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "tool-access"
+          ],
+          "query": [
+            {
+              "key": "role",
+              "value": "patient"
+            }
+          ]
+        },
+        "description": "Returns just the tools the given role may call: { role, capabilities, tools:[{name,capability}] }. Unknown role → HTTP 400. Change role to doctor/receptionist/admin."
       }
     }
   ]

@@ -65,21 +65,21 @@ All config is via environment variables, validated at boot
 | `TRUST_PROXY` | no | `false` | Set `true` behind a proxy/LB/ingress |
 | `LOG_LEVEL` | no | `info` | `fatal`…`trace` |
 
-## Authorization (session-scoped role)
+## Authorization (per-call `actorRole` argument)
 
 The tenant and the caller's role are both passed by the trusted client (not the AI model):
 
 - **`x-tenant-id`** header — the clinic to act on.
-- **`actorRole`** — who the AI is acting for: `patient`, `doctor`, `receptionist`, or `admin`. Passed **once**, in the JSON-RPC `initialize` request's `params`, and it applies to the **whole session**. A guard (`ActorRoleCaptureGuard`) captures `params.actorRole` at init; in stateful Streamable HTTP mcp-nest reuses that captured request for the session, so the role applies to every later `tools/list` and `tools/call`. **A session = one actor** — to act as a different role, open a new session. Omitted or unrecognised → `patient` (least privilege / fail-closed), the `DEFAULT_ACTOR_ROLE` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts), so a **staff-facing client MUST send an explicit `actorRole` (e.g. `receptionist`/`admin`) at init** to unlock staff tools.
+- **`actorRole`** — who the AI is acting for: `patient`, `doctor`, `receptionist`, or `admin`. Passed as a **per-call tool argument** in each `tools/call`'s `arguments` (exactly like `tenantId`). Omitted or unrecognised → `patient` (least privilege / fail-closed), the `DEFAULT_ACTOR_ROLE` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts), so a **staff-facing client MUST inject an explicit `actorRole` (e.g. `receptionist`/`admin`) into each call** to unlock staff tools.
 
 ```jsonc
-{ "jsonrpc": "2.0", "id": 1, "method": "initialize",
-  "params": { "protocolVersion": "2025-06-18", "capabilities": {},
-              "clientInfo": { "name": "…", "version": "…" },
-              "actorRole": "receptionist" } }
+{ "method": "tools/call",
+  "params": { "name": "statistics.get_appointment_summary",
+              "arguments": { "tenantId": "6935b6ea…", "actorRole": "receptionist",
+                             "from": "2026-07-01", "to": "2026-07-07" } } }
 ```
 
-> ⚠️ **`actorRole` is set once at `initialize` — not a per-call argument and not a header.** Because the role is fixed for the session, `tools/list` **is** filtered by role: a session only sees the tools its role can use (a `patient` session's list excludes `statistics.*`, `crm.*`, `appointment.find_patient`, `appointment.list_appointments`, `appointment.get_appointment`), and `tools/call` on a disallowed tool is rejected before any backend call. A **patient-facing client can omit `actorRole` or pass `patient`** so the model cannot widen its own access. See [docs/MCP_TOOL_AUTHORIZATION.md](docs/MCP_TOOL_AUTHORIZATION.md).
+> ⚠️ **`actorRole` is a per-call tool argument — not set at `initialize` and not a header.** Because the role is only known at call time, `tools/list` is **NOT** filtered by role: every tool is always listed for every caller. Calling a tool your role lacks is rejected per-call (`Not authorized: the '<role>' role cannot perform '<capability>'…`) before any backend call. Since `actorRole` is a model-produced argument, the trusted client should inject it into each call (like `tenantId`), and a **patient-facing client should hard-pin `actorRole: 'patient'`** so the model cannot self-elevate. See [docs/MCP_TOOL_AUTHORIZATION.md](docs/MCP_TOOL_AUTHORIZATION.md).
 
 Policy lives in [`src/common/mcp/authorization.util.ts`](src/common/mcp/authorization.util.ts) (`ROLE_CAPABILITIES`):
 
@@ -94,7 +94,9 @@ Policy lives in [`src/common/mcp/authorization.util.ts`](src/common/mcp/authoriz
 | `lead:read` | `crm.list_teams` / `crm.get_team` | ❌ | ✅ |
 | `lead:write` | `crm.assign_lead` | ❌ | ✅ |
 
-Enforcement is driven by the session role plus each tool's capability: `tools/list` **is filtered** so a session only sees the tools its role can use, and `tools/call` on a disallowed tool is rejected (`Access denied: insufficient permissions for tool '<name>'`) with the backend never hit. Patients get the self-service set — browse the clinic/doctors/specialties, check slots, and manage their own appointments (book/reschedule/cancel). They cannot search the patient directory, list every appointment in the tenant, or view analytics. Edit `ROLE_CAPABILITIES` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts) (and each tool's `@RequireCapability(...)`) to adjust.
+Enforcement is **per-call**: a `@RequireCapability(...)` wrapper (in [`tool-authorization.guard.ts`](src/common/mcp/tool-authorization.guard.ts)) wraps each tool handler and checks the call's `actorRole` against the tool's capability. `tools/list` is **NOT** filtered — every tool is always listed — but calling one your role lacks returns an error result (`Not authorized: the '<role>' role cannot perform '<capability>'…`) with the backend never hit. Patients get the self-service set — browse the clinic/doctors/specialties, check slots, and manage their own appointments (book/reschedule/cancel). They cannot search the patient directory, list every appointment in the tenant, or view analytics. Edit `ROLE_CAPABILITIES` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts) (and each tool's `@RequireCapability(...)`) to adjust.
+
+> 🔎 **Discovering role → tool access.** Because `tools/list` is not role-filtered, use the plain HTTP endpoint **`GET /tool-access`** to see the full policy matrix (`{ roles, capabilitiesByRole, tools, toolsByRole }`), or **`GET /tool-access?role=patient`** for just one role's callable tools. See [docs/MCP_TOOL_AUTHORIZATION.md](docs/MCP_TOOL_AUTHORIZATION.md).
 
 > ⚠️ **Self-scoping:** `actorRole` identifies the caller as a *patient*, not *which* patient, so the MCP layer cannot enforce "your own record only". A patient-facing client MUST constrain `patientId` (book) and `appointmentId` (reschedule/cancel) to the signed-in patient.
 

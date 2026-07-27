@@ -37,38 +37,44 @@ Rules that make this work:
 > **Why:** when the app changes how doctors are listed, MCP inherits it for free.
 > One query, one place.
 
-### B. Role-based authorization (session-scoped `actorRole` from `initialize`)
+### B. Role-based authorization (per-call `actorRole` argument)
 
-Every tool declares a **capability**; the caller passes a **role** once, in the
-`initialize` request's `params.actorRole`, and it applies to the whole session.
-`ActorRoleCaptureGuard` captures the role at init; in stateful Streamable HTTP
-mcp-nest reuses that captured request for the session (**a session = one
-actor**). Because the session role is known upfront, both list and call are
-enforced:
+Every tool declares a **capability**; the caller passes a **role** as a per-call
+`actorRole` argument in each `tools/call`'s `arguments` (exactly like `tenantId`).
+The `@RequireCapability(...)` wrapper around each tool handler reads that argument
+and checks it against the tool's capability. The role is only known at call time,
+so enforcement is **per-call**:
 
-- **`tools/list`** — **filtered by role**; a session only sees the tools its role can use.
-- **`tools/call`** — calling a tool the session role lacks is rejected; the backend is never hit.
+- **`tools/list`** — **NOT filtered**; every tool is always listed for every caller (the role isn't known until a tool is called).
+- **`tools/call`** — the wrapper rejects a call whose `actorRole` lacks the tool's capability; the backend is never hit.
+
+Because the list isn't role-filtered, a plain HTTP endpoint **`GET /tool-access`**
+exposes the role → tool policy for discovery — see
+[MCP_TOOL_AUTHORIZATION.md](./MCP_TOOL_AUTHORIZATION.md) (`GET /tool-access` for the
+full matrix, `GET /tool-access?role=patient` for one role).
 
 Key files:
 
 | File | What it holds |
 | --- | --- |
 | [`common/mcp/authorization.util.ts`](../src/common/mcp/authorization.util.ts) | Roles, capabilities, the `ROLE_CAPABILITIES` policy map, `DEFAULT_ACTOR_ROLE`, `resolveActorRole()` |
-| [`common/mcp/actor-role-capture.guard.ts`](../src/common/mcp/actor-role-capture.guard.ts) | `ActorRoleCaptureGuard` — captures `params.actorRole` from the `initialize` request so it's available for the whole session |
-| [`common/mcp/tool-authorization.guard.ts`](../src/common/mcp/tool-authorization.guard.ts) | `ToolCapabilityGuard` (filters `tools/list` + enforces `tools/call` against the session role) and the `@RequireCapability(cap)` decorator that tags each tool with its capability |
+| [`common/mcp/tool-authorization.guard.ts`](../src/common/mcp/tool-authorization.guard.ts) | The `@RequireCapability(cap)` wrapper that tags each tool with its capability and enforces the call's `actorRole` per-call |
+| [`tool-access/`](../src/tool-access/) | `ToolAccessController` + `ToolAccessService` — the `GET /tool-access` discovery endpoint |
 
 Security invariants (don't violate these):
 
-- **Role comes from the `initialize` request's `params.actorRole`**, set by the
-  trusted client before the model runs. The AI model never sees or influences it
-  (it's not a tool argument), so the model cannot self-elevate mid-session.
+- **Role comes from the `actorRole` tool argument**, which the trusted client
+  should inject into each call (like `tenantId`) rather than letting the model
+  choose. A patient-facing client should hard-pin `actorRole: 'patient'` so the
+  model cannot self-elevate. `actorRole` is authorization *scoping* for a trusted
+  client, not authentication — the real gate is `x-api-key`.
 - **Default is `patient`** (`DEFAULT_ACTOR_ROLE`) — least privilege / fail-closed.
   An omitted or unknown role value resolves to `patient`, so a staff-facing
-  client MUST send an explicit staff role (`receptionist` / `doctor` / `admin`)
-  at init to reach staff tools.
-- **`tools/list` is filtered** — the session role is known from `initialize`, so
-  the catalog only advertises the tools that role can use; `tools/call` enforces
-  the same policy.
+  client MUST inject an explicit staff role (`receptionist` / `doctor` / `admin`)
+  into each call to reach staff tools.
+- **`tools/list` is NOT filtered** — every tool is always listed; the per-call
+  `@RequireCapability` check is the only gate. Use `GET /tool-access` to discover
+  which role can call which tool.
 
 ---
 
@@ -87,8 +93,8 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly Capability[]> = {
 ```
 
 - **Grant/revoke a capability for a role** → add/remove it from that role's array.
-  The change instantly affects both the filtered `tools/list` and the `tools/call`
-  check for every tool tagged with that capability.
+  The change instantly affects the per-call `tools/call` check (and `GET /tool-access`)
+  for every tool tagged with that capability.
 - **Add a brand-new capability** → add the string to the `CAPABILITIES` array
   (and its `Capability` type updates automatically), add it to whichever roles
   should have it, then tag the relevant tools with `@RequireCapability('new:cap')`.
@@ -175,8 +181,8 @@ ids to the signed-in user.
 | Concern | File |
 | --- | --- |
 | Role/capability policy | `src/common/mcp/authorization.util.ts` |
-| Capture the role from `initialize` | `src/common/mcp/actor-role-capture.guard.ts` |
-| The capability guard + `@RequireCapability` | `src/common/mcp/tool-authorization.guard.ts` |
+| The `@RequireCapability` wrapper (per-call enforcement) | `src/common/mcp/tool-authorization.guard.ts` |
+| `GET /tool-access` discovery endpoint | `src/tool-access/` (`ToolAccessController` + `ToolAccessService`) |
 | Tenant resolution | `src/common/mcp/tenant.util.ts` |
 | Tool result helpers | `src/common/mcp/tool-response.util.ts` |
 | Backend HTTP client | `src/common/backend/backend-http.service.ts` |

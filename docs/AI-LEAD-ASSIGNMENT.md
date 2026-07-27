@@ -10,7 +10,7 @@ three assignment methods the app's create-lead flow uses.
 
 It covers:
 
-1. Session setup (headers + `actorRole` at `initialize`) — required before any CRM call succeeds.
+1. Session setup (headers + per-call `actorRole` argument) — required before any CRM call succeeds.
 2. The three tools, the order to call them, and what each returns.
 3. The 3 assignment methods and how each maps to `crm.assign_lead` arguments.
 4. How "round-robin" is resolved (load-aware, same engine as create).
@@ -18,33 +18,32 @@ It covers:
 
 ---
 
-## 1. Session setup (headers + `actorRole` at `initialize`)
+## 1. Session setup (headers + per-call `actorRole` argument)
 
-Every CRM call is scoped by request headers **and** the session's `actorRole`
-your **client** supplies at `initialize` (never the AI model).
+Every CRM call is scoped by request headers **and** the `actorRole` argument your
+**client** injects into each `tools/call` (never the AI model).
 
 | Where | Name | Purpose | Example |
 | --- | --- | --- | --- |
 | Header | `x-api-key` | Authenticates the client | `x-api-key: <MCP_CLIENT_API_KEY>` |
 | Header | `x-tenant-id` | Which clinic/workspace to act on (24-hex id) | `x-tenant-id: 6935b6ea…` |
-| `initialize` params | `actorRole` | Who the AI acts as (whole session) — **must be staff for CRM** | `"actorRole": "receptionist"` |
+| `tools/call` argument | `actorRole` | Who the AI acts as (per call) — **must be staff for CRM** | `"actorRole": "receptionist"` |
 
-- Pass `actorRole` **once**, in the `params` of the JSON-RPC `initialize`
-  request; it applies to the whole session (a session = one actor). It is **not**
-  a per-call argument and **not** a header. Allowed values: `patient` | `doctor`
-  | `receptionist` | `admin`.
+- Pass `actorRole` in the `arguments` of **every** `tools/call` (exactly like
+  `tenantId`). It is a per-call argument, **not** set at `initialize` and **not**
+  a header. Allowed values: `patient` | `doctor` | `receptionist` | `admin`.
   ```jsonc
-  { "jsonrpc": "2.0", "id": 1, "method": "initialize",
-    "params": { "protocolVersion": "2025-06-18", "capabilities": {},
-                "clientInfo": { "name": "…", "version": "…" },
-                "actorRole": "receptionist" } }
+  { "method": "tools/call",
+    "params": { "name": "crm.list_teams",
+                "arguments": { "tenantId": "6935b6ea…", "actorRole": "receptionist" } } }
   ```
 - The CRM tools require `lead:read` / `lead:write`, held by **`receptionist`,
   `doctor`, `admin`**. The default role is `patient` (omitted/unknown →
-  `patient`), so you **must** open the session with a staff role to use the CRM
-  tools — a `patient` session is **rejected**. And because `tools/list` is
-  filtered by the session role, a `patient` session won't even **see** the CRM
-  tools in the catalog.
+  `patient`), so you **must** inject a staff role into each CRM call — a call with
+  `actorRole: patient` (or none) is **rejected**. Note `tools/list` is **not**
+  filtered by role, so a patient session still **sees** the CRM tools in the
+  catalog; the calls are simply rejected. Use `GET /tool-access?role=receptionist`
+  to confirm which tools a staff role can call.
 
 See `docs/MCP_TOOL_AUTHORIZATION.md` for the full authorization model.
 
@@ -164,34 +163,34 @@ lead creation** (single source of truth):
 
 ## 5. End-to-end examples (JSON-RPC `tools/call`)
 
-> The session was opened with a staff `actorRole` (e.g. `receptionist`) at
-> `initialize`, so the role is **not** repeated in these `tools/call` arguments.
-> Open the session as `patient` (or omit `actorRole`) and these CRM tools are
-> hidden from `tools/list` and rejected on call.
+> A staff `actorRole` (e.g. `receptionist`) is injected into **every** call's
+> arguments — it's a per-call argument, so it must be present each time. Send
+> `actorRole: patient` (or omit it) and these CRM calls are **rejected** (the
+> tools still appear in `tools/list`, which isn't role-filtered).
 
 ```jsonc
 // 1. Pick a team by reading descriptions
-tools/call crm.list_teams { "tenantId": "<TID>", "format": "markdown" }
+tools/call crm.list_teams { "tenantId": "<TID>", "actorRole": "receptionist", "format": "markdown" }
 // → choose a team id, e.g. "6a430b66...e2e1"
 
 // 2. (only for "specific person") load its members
-tools/call crm.get_team { "tenantId": "<TID>", "teamId": "6a430b66...e2e1" }
+tools/call crm.get_team { "tenantId": "<TID>", "actorRole": "receptionist", "teamId": "6a430b66...e2e1" }
 // → teamLead.id, members[].id
 
 // 3a. Auto-distribute across the team (round-robin)
 tools/call crm.assign_lead {
-  "tenantId": "<TID>", "leadId": "<LEAD>",
+  "tenantId": "<TID>", "actorRole": "receptionist", "leadId": "<LEAD>",
   "teamId": "6a430b66...e2e1", "isRoundRobin": true
 }
 
 // 3b. …or assign to the team lead
 tools/call crm.assign_lead {
-  "tenantId": "<TID>", "leadId": "<LEAD>", "teamId": "6a430b66...e2e1"
+  "tenantId": "<TID>", "actorRole": "receptionist", "leadId": "<LEAD>", "teamId": "6a430b66...e2e1"
 }
 
 // 3c. …or assign to a specific member
 tools/call crm.assign_lead {
-  "tenantId": "<TID>", "leadId": "<LEAD>",
+  "tenantId": "<TID>", "actorRole": "receptionist", "leadId": "<LEAD>",
   "assignedTo": "66fa1100...bb01"
 }
 ```

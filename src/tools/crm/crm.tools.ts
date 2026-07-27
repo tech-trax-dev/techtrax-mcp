@@ -12,6 +12,8 @@ import {
 } from '../../common/mcp/tenant.util';
 import type { ToolRequest } from '../../common/mcp/tenant.util';
 import { RequireCapability } from '../../common/mcp/tool-authorization.guard';
+import { actorRoleParam } from '../../common/mcp/authorization.util';
+import type { ActorRole } from '../../common/mcp/authorization.util';
 import {
   TeamsListOutputSchema,
   TeamDetailOutputSchema,
@@ -60,6 +62,7 @@ export class CrmTools {
       "Lists the workspace's teams so you can route a lead to the right one. Returns per team: id, name, description (what the team handles — use this + the team name to match the lead's conversation), memberCount, teamLeadName, status, isSystemReserved. Step 1 of assigning a lead: read the descriptions, pick the best-fit team, then call crm.get_team for its members. Paginated (read pagination.pages). Note: the system-reserved 'Unassigned' team (isSystemReserved=true) is the no-owner bucket — don't assign real leads to it.",
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       status: z
         .enum(['active', 'archived'])
         .optional()
@@ -76,6 +79,7 @@ export class CrmTools {
   async listTeams(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       status?: 'active' | 'archived';
       search?: string;
       page?: number;
@@ -114,6 +118,7 @@ export class CrmTools {
       "Returns one team's teamLead and members (each with id, name, roleName) plus its description and memberCount. Step 2 of assigning a lead: after picking a team with crm.list_teams, call this to get the member/lead ids, then choose who should own the lead and pass their id as assignedTo to crm.assign_lead. `teamLead` may be null (team with no designated lead).",
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       teamId: z.string().min(1),
       format: formatSchema.optional(),
     }),
@@ -124,6 +129,7 @@ export class CrmTools {
   async getTeam(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       teamId: string;
       format?: OutputFormat;
     },
@@ -160,6 +166,7 @@ export class CrmTools {
       'Rules: give `assignedTo` or `teamId` (at least one). `assignedTo` + `isRoundRobin` together is rejected. The chosen user must be an active, non-admin member (the backend validates). Returns the updated lead with its resolved assignedTo.',
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       leadId: z
         .string()
         .min(1)
@@ -200,6 +207,7 @@ export class CrmTools {
   async assignLead(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       leadId: string;
       assignedTo?: string;
       teamId?: string;

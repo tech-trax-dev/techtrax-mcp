@@ -109,7 +109,7 @@ describe('StatisticsTools', () => {
     it('get_appointment_summary: forwards tenant header + range, schema-valid', async () => {
       backend.get.mockResolvedValue(appointmentSummary);
       const result = await tools.getAppointmentSummary(
-        { from: '2026-06-18', to: '2026-06-24' },
+        { actorRole: 'admin', from: '2026-06-18', to: '2026-06-24' },
         undefined,
         request,
       );
@@ -132,7 +132,11 @@ describe('StatisticsTools', () => {
 
     it('get_cancellation_stats: tolerates stringified percentages from reused helpers', async () => {
       backend.get.mockResolvedValue(cancellationStats);
-      const result = await tools.getCancellationStats({}, undefined, request);
+      const result = await tools.getCancellationStats(
+        { actorRole: 'admin' },
+        undefined,
+        request,
+      );
       expect(() =>
         CancellationStatsOutputSchema.parse(result.structuredContent),
       ).not.toThrow();
@@ -140,7 +144,11 @@ describe('StatisticsTools', () => {
 
     it('get_financial_summary: returns schema-valid structuredContent', async () => {
       backend.get.mockResolvedValue(financialSummary);
-      const result = await tools.getFinancialSummary({}, undefined, request);
+      const result = await tools.getFinancialSummary(
+        { actorRole: 'admin' },
+        undefined,
+        request,
+      );
       expect(() =>
         FinancialSummaryOutputSchema.parse(result.structuredContent),
       ).not.toThrow();
@@ -149,7 +157,7 @@ describe('StatisticsTools', () => {
     it('get_growth_trends: markdown format renders a readable summary', async () => {
       backend.get.mockResolvedValue(growthTrends);
       const result = await tools.getGrowthTrends(
-        { format: 'markdown' },
+        { actorRole: 'admin', format: 'markdown' },
         undefined,
         request,
       );
@@ -162,7 +170,11 @@ describe('StatisticsTools', () => {
 
     it('backend failure becomes a readable isError, not a throw', async () => {
       backend.get.mockRejectedValue(new BackendException(502, 'backend down'));
-      const result = await tools.getDoctorPerformance({}, undefined, request);
+      const result = await tools.getDoctorPerformance(
+        { actorRole: 'admin' },
+        undefined,
+        request,
+      );
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('backend down');
     });
@@ -170,7 +182,11 @@ describe('StatisticsTools', () => {
 
   describe('tenant context + annotations', () => {
     it('returns an error when tenant context is missing', async () => {
-      const result = await tools.getAppointmentSummary({}, undefined, {});
+      const result = await tools.getAppointmentSummary(
+        { actorRole: 'admin' },
+        undefined,
+        {},
+      );
       expect(result.isError).toBe(true);
       expect(backend.get).not.toHaveBeenCalled();
     });

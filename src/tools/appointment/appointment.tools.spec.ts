@@ -82,7 +82,7 @@ describe('AppointmentTools', () => {
     it('find_patient: empty result is a success, schema-valid', async () => {
       backend.get.mockResolvedValue(emptyPatients);
       const result = await tools.findPatient(
-        { query: 'nobody' },
+        { actorRole: 'admin', query: 'nobody' },
         undefined,
         request,
       );
@@ -106,7 +106,11 @@ describe('AppointmentTools', () => {
 
     it('list_appointments: returns schema-valid structuredContent', async () => {
       backend.get.mockResolvedValue(appointmentsListResponse);
-      const result = await tools.listAppointments({}, undefined, request);
+      const result = await tools.listAppointments(
+        { actorRole: 'admin' },
+        undefined,
+        request,
+      );
       expect(() =>
         AppointmentsListOutputSchema.parse(result.structuredContent),
       ).not.toThrow();
@@ -115,7 +119,7 @@ describe('AppointmentTools', () => {
     it('get_appointment: 404 surfaces as a readable isError', async () => {
       backend.get.mockRejectedValue(new BackendException(404, 'nope'));
       const result = await tools.getAppointment(
-        { appointmentId: 'missing' },
+        { actorRole: 'admin', appointmentId: 'missing' },
         undefined,
         request,
       );
@@ -206,7 +210,11 @@ describe('AppointmentTools', () => {
 
   describe('tenant context + annotations', () => {
     it('returns an error when tenant context is missing', async () => {
-      const result = await tools.listAppointments({}, undefined, {});
+      const result = await tools.listAppointments(
+        { actorRole: 'admin' },
+        undefined,
+        {},
+      );
       expect(result.isError).toBe(true);
       expect(backend.get).not.toHaveBeenCalled();
     });
@@ -215,7 +223,7 @@ describe('AppointmentTools', () => {
       backend.get.mockResolvedValue(appointmentsListResponse);
       const argTenant = '64b7f0000000000000000002';
       await tools.listAppointments(
-        { tenantId: argTenant },
+        { tenantId: argTenant, actorRole: 'admin' },
         undefined,
         {}, // no request.user, no x-tenant-id header
       );

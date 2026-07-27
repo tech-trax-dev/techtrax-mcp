@@ -1,58 +1,50 @@
-import {
-  applyDecorators,
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-  SetMetadata,
-} from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { ToolGuards } from '@rekog/mcp-nest';
-import { resolveActorRole, roleCan } from './authorization.util';
-import type { ActorRoleRequest, Capability } from './authorization.util';
+import 'reflect-metadata';
+import { authorize } from './authorization.util';
+import type { Capability } from './authorization.util';
 
 /**
- * Capability-based tool guard.
+ * Capability-based tool authorization.
  *
- * @rekog/mcp-nest runs a tool's guards both when LISTING tools (to decide which
- * to advertise) and when CALLING one (to allow/deny). By attaching this guard —
- * via `@RequireCapability(...)` — every tagged tool is:
- *   • hidden from `tools/list` for a session whose role lacks its capability, and
- *   • rejected on `tools/call` for that session.
+ * The caller's role is an `actorRole` tool **argument** (see authorization.util
+ * + docs/MCP_TOOL_AUTHORIZATION.md), so it is only known at call time. This
+ * decorator wraps the tool handler: before the handler runs it reads `actorRole`
+ * from the call arguments and, if the role lacks the required capability, returns
+ * a "not authorized" result and never invokes the handler (so the backend is
+ * never hit).
  *
- * So a `patient` session only sees (and can call) the patient-allowed tools.
+ * ⚠️ Because the role is an argument (not a session header/param), `tools/list`
+ * cannot be filtered by role — every tool is advertised. Enforcement is per-call
+ * only. The `GET /tool-access` endpoint exposes the role→tool policy.
  *
- * The session's role is resolved from the request captured at `initialize`
- * (stamped by `ActorRoleCaptureGuard`, read by `resolveActorRole`); the required
- * capability comes from the `@RequireCapability(...)` metadata on the tool method.
+ * The capability is also recorded as method metadata (`mcp:capability`) so the
+ * tool-access endpoint can enumerate each tool's required capability.
+ *
+ * Put it next to `@Tool({...})`:
+ *
+ *   @Tool({ name: 'statistics.get_appointment_summary', ... })
+ *   @RequireCapability('statistics:read')
+ *   async getAppointmentSummary(args, _ctx, req) { ... }
  */
 
 export const CAPABILITY_METADATA_KEY = 'mcp:capability';
 
-@Injectable()
-export class ToolCapabilityGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+export const RequireCapability = (capability: Capability): MethodDecorator => {
+  return (
+    _target: object,
+    _propertyKey: string | symbol,
+    descriptor: PropertyDescriptor,
+  ): PropertyDescriptor => {
+    const original = descriptor.value as (...callArgs: unknown[]) => unknown;
 
-  canActivate(context: ExecutionContext): boolean {
-    const capability = this.reflector.get<Capability | undefined>(
-      CAPABILITY_METADATA_KEY,
-      context.getHandler(),
-    );
-    // A tool with no declared capability is unrestricted.
-    if (!capability) return true;
+    const wrapped = function (this: unknown, ...callArgs: unknown[]): unknown {
+      const toolArgs = callArgs[0] as { actorRole?: unknown } | undefined;
+      const denied = authorize(toolArgs, capability);
+      if (denied) return denied;
+      return original.apply(this, callArgs) as unknown;
+    };
 
-    const request = context.switchToHttp().getRequest<ActorRoleRequest>();
-    const role = resolveActorRole(request);
-    return roleCan(role, capability);
-  }
-}
-
-/**
- * Tag a tool with the capability required to see and call it. Applies the
- * capability metadata AND attaches `ToolCapabilityGuard`, so `tools/list` is
- * filtered per role and calls are enforced. Put it next to `@Tool({...})`.
- */
-export const RequireCapability = (capability: Capability) =>
-  applyDecorators(
-    SetMetadata(CAPABILITY_METADATA_KEY, capability),
-    ToolGuards([ToolCapabilityGuard]),
-  );
+    descriptor.value = wrapped;
+    Reflect.defineMetadata(CAPABILITY_METADATA_KEY, capability, wrapped);
+    return descriptor;
+  };
+};

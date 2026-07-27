@@ -38,7 +38,7 @@ describe('CrmTools', () => {
       backend.get.mockResolvedValue(payload);
 
       const result = await tools.listTeams(
-        { tenantId: TENANT },
+        { tenantId: TENANT, actorRole: 'admin' },
         undefined,
         req,
       );
@@ -50,7 +50,11 @@ describe('CrmTools', () => {
     });
 
     it('errors when tenant is missing', async () => {
-      const result = await tools.listTeams({}, undefined, {});
+      const result = await tools.listTeams(
+        { actorRole: 'admin' },
+        undefined,
+        {},
+      );
       expect(result.isError).toBe(true);
       expect(backend.get).not.toHaveBeenCalled();
     });
@@ -71,7 +75,7 @@ describe('CrmTools', () => {
       backend.get.mockResolvedValue(payload);
 
       const result = await tools.getTeam(
-        { tenantId: TENANT, teamId: 't1' },
+        { tenantId: TENANT, actorRole: 'admin', teamId: 't1' },
         undefined,
         req,
       );
@@ -85,7 +89,7 @@ describe('CrmTools', () => {
     it('maps a 404 to a friendly error', async () => {
       backend.get.mockRejectedValue(new BackendException(404, 'not found'));
       const result = await tools.getTeam(
-        { tenantId: TENANT, teamId: 'nope' },
+        { tenantId: TENANT, actorRole: 'admin', teamId: 'nope' },
         undefined,
         req,
       );
@@ -112,6 +116,7 @@ describe('CrmTools', () => {
       const result = await tools.assignLead(
         {
           tenantId: TENANT,
+          actorRole: 'admin',
           leadId: 'lead1',
           assignedTo: 'u2',
         },
@@ -139,7 +144,7 @@ describe('CrmTools', () => {
       backend.post.mockResolvedValue(leadPayload);
 
       await tools.assignLead(
-        { tenantId: TENANT, leadId: 'lead1', teamId: 't1' },
+        { tenantId: TENANT, actorRole: 'admin', leadId: 'lead1', teamId: 't1' },
         undefined,
         req,
       );
@@ -162,6 +167,7 @@ describe('CrmTools', () => {
       await tools.assignLead(
         {
           tenantId: TENANT,
+          actorRole: 'admin',
           leadId: 'lead1',
           teamId: 't1',
           isRoundRobin: true,
@@ -184,7 +190,7 @@ describe('CrmTools', () => {
 
     it('rejects when neither assignedTo nor teamId is given (no backend call)', async () => {
       const result = await tools.assignLead(
-        { tenantId: TENANT, leadId: 'lead1' },
+        { tenantId: TENANT, actorRole: 'admin', leadId: 'lead1' },
         undefined,
         req,
       );
@@ -196,6 +202,7 @@ describe('CrmTools', () => {
       const result = await tools.assignLead(
         {
           tenantId: TENANT,
+          actorRole: 'admin',
           leadId: 'lead1',
           assignedTo: 'u2',
           isRoundRobin: true,
@@ -217,6 +224,7 @@ describe('CrmTools', () => {
       const result = await tools.assignLead(
         {
           tenantId: TENANT,
+          actorRole: 'admin',
           leadId: 'lead1',
           assignedTo: 'bad',
         },

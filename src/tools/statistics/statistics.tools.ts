@@ -11,6 +11,8 @@ import {
 } from '../../common/mcp/tenant.util';
 import type { ToolRequest } from '../../common/mcp/tenant.util';
 import { RequireCapability } from '../../common/mcp/tool-authorization.guard';
+import { actorRoleParam } from '../../common/mcp/authorization.util';
+import type { ActorRole } from '../../common/mcp/authorization.util';
 import {
   AppointmentSummaryOutputSchema,
   CancellationStatsOutputSchema,
@@ -36,6 +38,7 @@ type OutputFormat = 'json' | 'markdown';
 
 type RangeArgs = {
   tenantId?: string;
+  actorRole?: ActorRole;
   from?: string;
   to?: string;
   timezone?: string;
@@ -48,6 +51,7 @@ const formatSchema = z.enum(['json', 'markdown']).default('json');
 // (YYYY-MM-DD); the backend defaults to the last 7 days when both are omitted.
 const rangeParams = {
   tenantId: tenantIdParam,
+  actorRole: actorRoleParam,
   from: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'from must be YYYY-MM-DD')

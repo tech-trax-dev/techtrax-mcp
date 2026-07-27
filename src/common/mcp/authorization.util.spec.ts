@@ -1,32 +1,29 @@
-import type { ExecutionContext } from '@nestjs/common';
-import type { Reflector } from '@nestjs/core';
+import 'reflect-metadata';
 import {
-  ACTOR_ROLE_REQUEST_KEY,
   ROLE_CAPABILITIES,
   resolveActorRole,
   roleCan,
+  rolesWithCapability,
   authorize,
 } from './authorization.util';
-import type { Capability } from './authorization.util';
-import { ToolCapabilityGuard } from './tool-authorization.guard';
-import { ActorRoleCaptureGuard } from './actor-role-capture.guard';
-
-const reqWithRole = (role?: string) =>
-  role === undefined ? {} : { [ACTOR_ROLE_REQUEST_KEY]: role };
+import {
+  RequireCapability,
+  CAPABILITY_METADATA_KEY,
+} from './tool-authorization.guard';
 
 describe('authorization.util', () => {
-  describe('resolveActorRole (from the captured initialize request)', () => {
-    it('reads a valid stamped role (case/space-insensitive)', () => {
-      expect(resolveActorRole(reqWithRole('Patient'))).toBe('patient');
-      expect(resolveActorRole(reqWithRole(' admin '))).toBe('admin');
+  describe('resolveActorRole (from the actorRole argument)', () => {
+    it('reads a valid actorRole (case/space-insensitive)', () => {
+      expect(resolveActorRole({ actorRole: 'Patient' })).toBe('patient');
+      expect(resolveActorRole({ actorRole: ' admin ' })).toBe('admin');
     });
 
     it('collapses an unknown role to the least-privileged patient (fail closed)', () => {
-      expect(resolveActorRole(reqWithRole('superuser'))).toBe('patient');
+      expect(resolveActorRole({ actorRole: 'superuser' })).toBe('patient');
     });
 
-    it('falls back to least-privilege patient when nothing was stamped', () => {
-      expect(resolveActorRole(reqWithRole(undefined))).toBe('patient');
+    it('falls back to least-privilege patient when omitted', () => {
+      expect(resolveActorRole({})).toBe('patient');
       expect(resolveActorRole(undefined)).toBe('patient');
     });
   });
@@ -39,7 +36,6 @@ describe('authorization.util', () => {
         'appointment:write',
       ]);
       expect(roleCan('patient', 'clinic:read')).toBe(true);
-      expect(roleCan('patient', 'slots:read')).toBe(true);
       expect(roleCan('patient', 'appointment:write')).toBe(true);
       expect(roleCan('patient', 'statistics:read')).toBe(false);
       expect(roleCan('patient', 'patient:read')).toBe(false);
@@ -50,7 +46,6 @@ describe('authorization.util', () => {
       for (const role of ['doctor', 'receptionist', 'admin'] as const) {
         expect(roleCan(role, 'statistics:read')).toBe(true);
         expect(roleCan(role, 'patient:read')).toBe(true);
-        expect(roleCan(role, 'appointment:write')).toBe(true);
         expect(roleCan(role, 'lead:read')).toBe(true);
         expect(roleCan(role, 'lead:write')).toBe(true);
       }
@@ -62,112 +57,83 @@ describe('authorization.util', () => {
     });
   });
 
+  describe('rolesWithCapability', () => {
+    it('lists exactly the roles holding a capability', () => {
+      expect(rolesWithCapability('clinic:read')).toEqual([
+        'patient',
+        'doctor',
+        'receptionist',
+        'admin',
+      ]);
+      expect(rolesWithCapability('statistics:read')).toEqual([
+        'doctor',
+        'receptionist',
+        'admin',
+      ]);
+      expect(rolesWithCapability('lead:write')).toEqual([
+        'doctor',
+        'receptionist',
+        'admin',
+      ]);
+    });
+  });
+
   describe('authorize', () => {
     it('returns an error result (isError) when the role lacks the capability', () => {
-      const denied = authorize(reqWithRole('patient'), 'statistics:read');
+      const denied = authorize({ actorRole: 'patient' }, 'statistics:read');
       expect(denied?.isError).toBe(true);
       expect(denied?.content[0].text).toMatch(/not authorized/i);
     });
 
     it('returns null (proceed) when the role holds the capability', () => {
-      expect(authorize(reqWithRole('patient'), 'clinic:read')).toBeNull();
+      expect(authorize({ actorRole: 'patient' }, 'clinic:read')).toBeNull();
       expect(
-        authorize(reqWithRole('receptionist'), 'statistics:read'),
+        authorize({ actorRole: 'receptionist' }, 'statistics:read'),
       ).toBeNull();
     });
   });
 });
 
-describe('ToolCapabilityGuard (tools/list filter + call enforcement)', () => {
-  const makeContext = (role?: string): ExecutionContext =>
-    ({
-      getHandler: () => () => undefined,
-      switchToHttp: () => ({ getRequest: () => reqWithRole(role) }),
-    }) as unknown as ExecutionContext;
+describe('RequireCapability decorator (per-call enforcement)', () => {
+  class Host {
+    calls = 0;
 
-  const guardFor = (
-    capability: Capability | undefined,
-  ): ToolCapabilityGuard => {
-    const reflector = {
-      get: jest.fn().mockReturnValue(capability),
-    } as unknown as Reflector;
-    return new ToolCapabilityGuard(reflector);
-  };
+    @RequireCapability('statistics:read')
+    run(args: { actorRole?: string }): { ok: true } {
+      void args;
+      this.calls += 1;
+      return { ok: true };
+    }
+  }
 
-  it('denies a statistics tool for a patient (so it is hidden + not callable)', () => {
-    expect(
-      guardFor('statistics:read').canActivate(makeContext('patient')),
-    ).toBe(false);
+  it('records the capability as method metadata (for the tool-access endpoint)', () => {
+    const meta = Reflect.getMetadata(
+      CAPABILITY_METADATA_KEY,
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      Host.prototype.run,
+    ) as string;
+    expect(meta).toBe('statistics:read');
   });
 
-  it('allows a statistics tool for staff', () => {
-    expect(
-      guardFor('statistics:read').canActivate(makeContext('receptionist')),
-    ).toBe(true);
+  it('runs the handler when the role is authorized', () => {
+    const host = new Host();
+    expect(host.run({ actorRole: 'receptionist' })).toEqual({ ok: true });
+    expect(host.calls).toBe(1);
   });
 
-  it('allows patient self-service tools (clinic:read, appointment:write)', () => {
-    expect(guardFor('clinic:read').canActivate(makeContext('patient'))).toBe(
-      true,
-    );
-    expect(
-      guardFor('appointment:write').canActivate(makeContext('patient')),
-    ).toBe(true);
+  it('blocks the handler (isError, no invocation) for an unauthorized role', () => {
+    const host = new Host();
+    const result = host.run({ actorRole: 'patient' }) as unknown as {
+      isError?: boolean;
+    };
+    expect(result.isError).toBe(true);
+    expect(host.calls).toBe(0);
   });
 
-  it('denies patient-directory / appointment listing for a patient', () => {
-    expect(guardFor('patient:read').canActivate(makeContext('patient'))).toBe(
-      false,
-    );
-    expect(
-      guardFor('appointment:read').canActivate(makeContext('patient')),
-    ).toBe(false);
-  });
-
-  it('defaults a role-less session to patient (staff tool denied)', () => {
-    expect(
-      guardFor('statistics:read').canActivate(makeContext(undefined)),
-    ).toBe(false);
-  });
-
-  it('allows a tool with no declared capability', () => {
-    expect(guardFor(undefined).canActivate(makeContext('patient'))).toBe(true);
-  });
-});
-
-describe('ActorRoleCaptureGuard (stamps the role from initialize)', () => {
-  const guard = new ActorRoleCaptureGuard();
-
-  const ctx = (body: unknown): ExecutionContext => {
-    const req: Record<string, unknown> = { body };
-    return {
-      switchToHttp: () => ({ getRequest: () => req }),
-      // expose the mutated request for assertions
-      __req: req,
-    } as unknown as ExecutionContext & { __req: Record<string, unknown> };
-  };
-
-  it('stamps params.actorRole from an initialize request', () => {
-    const c = ctx({
-      method: 'initialize',
-      params: { actorRole: 'receptionist' },
-    });
-    expect(guard.canActivate(c)).toBe(true);
-    const req = (c as unknown as { __req: Record<string, unknown> }).__req;
-    expect(req[ACTOR_ROLE_REQUEST_KEY]).toBe('receptionist');
-  });
-
-  it('stamps undefined when initialize omits actorRole', () => {
-    const c = ctx({ method: 'initialize', params: {} });
-    guard.canActivate(c);
-    const req = (c as unknown as { __req: Record<string, unknown> }).__req;
-    expect(req[ACTOR_ROLE_REQUEST_KEY]).toBeUndefined();
-  });
-
-  it('does not stamp on a non-initialize request', () => {
-    const c = ctx({ method: 'tools/list', params: { actorRole: 'admin' } });
-    guard.canActivate(c);
-    const req = (c as unknown as { __req: Record<string, unknown> }).__req;
-    expect(ACTOR_ROLE_REQUEST_KEY in req).toBe(false);
+  it('blocks when actorRole is omitted (defaults to patient)', () => {
+    const host = new Host();
+    const result = host.run({}) as unknown as { isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(host.calls).toBe(0);
   });
 });

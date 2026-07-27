@@ -11,6 +11,8 @@ import {
 } from '../../common/mcp/tenant.util';
 import type { ToolRequest } from '../../common/mcp/tenant.util';
 import { RequireCapability } from '../../common/mcp/tool-authorization.guard';
+import { actorRoleParam } from '../../common/mcp/authorization.util';
+import type { ActorRole } from '../../common/mcp/authorization.util';
 import {
   ClinicProfileOutputSchema,
   DoctorAvailabilityOutputSchema,
@@ -45,6 +47,7 @@ export class TenantInfoTools {
       "Returns the clinic's identity and operating info: name, description, logo URL, phone numbers, email, address, list of medical specialties, timezone, weekly operating hours, and a live currentStatus. currentStatus is one of open_now (within today's hours), closed_now (a working day but outside hours), or closed_today (not a working day). Use this for any question about the clinic itself — location, contact, services, hours, or whether it is open right now. Do NOT use it for doctor-specific questions.",
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       format: formatSchema.optional(),
     }),
     outputSchema: ClinicProfileOutputSchema,
@@ -86,6 +89,7 @@ export class TenantInfoTools {
       "Lists and filters doctors in the clinic. Returns per doctor: id, fullName, specialty, presenceStatus (present = currently clocked in / accepting; absent = not), and totalAppointments (completed appointment count). Use this to answer 'which doctors' questions (directory, by name, by specialty, by presence). For one specific doctor's bookable availability and online/offline support use tenant_info.get_doctor_availability; for credentials use tenant_info.get_doctor_profile. Results are paginated: read pagination.has_more. To paginate, pass `next_page` from the previous response as the `page` param in your next call. When `has_more` is false, you have reached the last page. An empty doctors array is a valid result (the clinic has no doctors matching the filters), not an error.",
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       name: z.string().min(1).optional(),
       specialty: z.string().min(1).optional(),
       presenceStatus: z
@@ -105,6 +109,7 @@ export class TenantInfoTools {
   async listDoctors(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       name?: string;
       specialty?: string;
       presenceStatus?: 'present' | 'absent';
@@ -152,6 +157,7 @@ export class TenantInfoTools {
       "Returns one doctor's STATIC professional profile: name (firstName/lastName/fullName), email, phone, specialty, bio, education (university/faculty/major/graduationYear/degree/level), certifications (certificationName + year), and lifetime totals (totalAppointments, totalPatients). Use for 'who is this doctor / background / credentials' questions. Does NOT include schedule or availability — use tenant_info.get_doctor_availability for that.",
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       doctorId: z.string().min(1),
       format: formatSchema.optional(),
     }),
@@ -194,6 +200,7 @@ export class TenantInfoTools {
       "Returns whether a doctor can be booked TODAY and their weekly schedule. Fields: available (bool); reason (absent = doctor not clocked in; no_shift_today = no working shift for today's weekday; null when available); availableOnline/availableOffline (consultation modes the doctor supports overall); schedule[] of {day,startTime,endTime,mode} where mode is online, offline, or both. Use for 'is Dr X available today / when does Dr X work / online or clinic day' questions. Advisory note: this reflects schedule + presence only; it does NOT count appointment slots, so it cannot confirm an exact bookable time — the booking flow is the source of truth.",
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       doctorId: z.string().min(1),
       format: formatSchema.optional(),
     }),

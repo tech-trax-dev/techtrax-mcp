@@ -1,16 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { DiscoveryModule } from '@nestjs/core';
 import { McpModule, McpTransportType } from '@rekog/mcp-nest';
 import { LoggerModule } from 'nestjs-pino';
 import { BackendModule } from './common/backend/backend.module';
-import { ActorRoleCaptureGuard } from './common/mcp/actor-role-capture.guard';
 import { McpClientGuard } from './common/mcp/mcp-client.guard';
-import { ToolCapabilityGuard } from './common/mcp/tool-authorization.guard';
 import { Env } from './config/config.types';
 import { validateEnv } from './config/env.validation';
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from './config/mcp.constants';
 import { HealthController } from './health/health.controller';
+import { ToolAccessController } from './tool-access/tool-access.controller';
+import { ToolAccessService } from './tool-access/tool-access.service';
 import { ToolsModule } from './tools/tools.module';
 
 @Module({
@@ -55,17 +56,17 @@ import { ToolsModule } from './tools/tools.module';
         sessionIdGenerator: () => randomUUID(),
         statelessMode: false,
       },
-      // Guards run on every MCP POST (initialize / tools/list / tools/call):
-      //  - McpClientGuard: inbound `x-api-key` auth (no-op until the key is set).
-      //  - ActorRoleCaptureGuard: stamps the session's role from the initialize
-      //    request's `params.actorRole` so ToolCapabilityGuard can enforce it.
-      guards: [McpClientGuard, ActorRoleCaptureGuard],
+      // Inbound auth. The guard is a no-op when MCP_CLIENT_API_KEY is unset
+      // (local/dev); it enforces `x-api-key` once the key is configured, and
+      // env validation makes the key mandatory in production.
+      guards: [McpClientGuard],
     }),
 
+    DiscoveryModule,
     BackendModule,
     ToolsModule,
   ],
-  controllers: [HealthController],
-  providers: [McpClientGuard, ActorRoleCaptureGuard, ToolCapabilityGuard],
+  controllers: [HealthController, ToolAccessController],
+  providers: [McpClientGuard, ToolAccessService],
 })
 export class AppModule {}

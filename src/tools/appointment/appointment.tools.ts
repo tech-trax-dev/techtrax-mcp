@@ -11,6 +11,8 @@ import {
 } from '../../common/mcp/tenant.util';
 import type { ToolRequest } from '../../common/mcp/tenant.util';
 import { RequireCapability } from '../../common/mcp/tool-authorization.guard';
+import { actorRoleParam } from '../../common/mcp/authorization.util';
+import type { ActorRole } from '../../common/mcp/authorization.util';
 import {
   AppointmentOutputSchema,
   AppointmentsListOutputSchema,
@@ -63,6 +65,7 @@ export class AppointmentTools {
       "Searches the clinic's patients by name, phone, or email to resolve a patientId. Use this FIRST when you need to book an appointment but only know the patient by name/phone/email — booking requires a patientId. Returns per patient: id, fullName, firstName, lastName, email, phone. Results are paginated (read pagination.hasMore; pass `nextPage` as `page` to continue). An empty patients array is a valid result (no match), not an error.",
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       query: z
         .string()
         .min(1)
@@ -78,6 +81,7 @@ export class AppointmentTools {
   async findPatient(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       query: string;
       page?: number;
       limit?: number;
@@ -108,6 +112,7 @@ export class AppointmentTools {
       "Returns bookable times for a doctor. WITHOUT `date`: returns available calendar dates (granularity='dates') for roughly the next two months. WITH `date` (YYYY-MM-DD): returns exact bookable ISO datetimes for that day (granularity='slots'), already excluding booked/past times. Always call this before appointment.book and pass one of the returned slot values verbatim as appointmentDateTime. Optionally filter by sessionType (online | on-site). An empty slots array means nothing is bookable for that input, not an error.",
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       doctorId: z.string().min(1),
       date: z
         .string()
@@ -124,6 +129,7 @@ export class AppointmentTools {
   async getAvailableSlots(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       doctorId: string;
       date?: string;
       sessionType?: (typeof SESSION_TYPES)[number];
@@ -159,6 +165,7 @@ export class AppointmentTools {
       'Lists appointments for the clinic, newest first. Use this to find an appointmentId to cancel or reschedule. Filter by status (e.g. upcoming, serving, completed, cancelled), doctorId, patientId, and a date range (from/to, ISO). Returns per appointment: id, patientId, patientName, doctorId, doctorName, appointmentDateTime, appointmentEndTime, sessionType, visitType, status, duration. Paginated (read pagination.hasMore; pass `nextPage` as `page`).',
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       status: z.string().min(1).optional(),
       doctorId: z.string().min(1).optional(),
       patientId: z.string().min(1).optional(),
@@ -175,6 +182,7 @@ export class AppointmentTools {
   async listAppointments(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       status?: string;
       doctorId?: string;
       patientId?: string;
@@ -219,6 +227,7 @@ export class AppointmentTools {
       'Returns a single appointment by id: patient, doctor, scheduled time, session type, status, and cancellation details if any. Use to confirm details before rescheduling/cancelling, or to verify a booking.',
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       appointmentId: z.string().min(1),
       format: formatSchema.optional(),
     }),
@@ -229,6 +238,7 @@ export class AppointmentTools {
   async getAppointment(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       appointmentId: string;
       format?: OutputFormat;
     },
@@ -260,6 +270,7 @@ export class AppointmentTools {
       "Books a new appointment. Requires patientId (use appointment.find_patient to resolve one), doctorId, appointmentDateTime (an ISO value from appointment.get_available_slots for that doctor), and sessionType (online | on-site). Optionally pass actorUserId to record who performed the booking (a receptionist or the patient); if omitted the booking is attributed to a system actor. The backend validates the slot against the doctor's shift, leave, and existing appointments and rejects overlaps. NOT idempotent — do not retry a successful call. Returns the created appointment.",
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       patientId: z.string().min(1),
       doctorId: z.string().min(1),
       appointmentDateTime: z
@@ -285,6 +296,7 @@ export class AppointmentTools {
   async book(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       patientId: string;
       doctorId: string;
       appointmentDateTime: string;
@@ -327,6 +339,7 @@ export class AppointmentTools {
       "Reschedules an existing appointment to a new time. Requires appointmentId, appointmentDateTime (an ISO value from appointment.get_available_slots for the same doctor), and sessionType (online | on-site). Optionally actorUserId. The backend re-validates the new slot against the doctor's shift, work-mode, leave, and conflicts. NOT idempotent. Returns the updated appointment.",
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       appointmentId: z.string().min(1),
       appointmentDateTime: z
         .string()
@@ -343,6 +356,7 @@ export class AppointmentTools {
   async reschedule(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       appointmentId: string;
       appointmentDateTime: string;
       sessionType: (typeof SESSION_TYPES)[number];
@@ -382,6 +396,7 @@ export class AppointmentTools {
       'Cancels an existing appointment. Requires appointmentId. Optionally pass cancelReason, cancelNote (≤150 chars), and actorUserId (who cancelled). Cancelling also removes the appointment from the queue and cancels any linked online meeting. Already-cancelled or completed appointments are rejected. DESTRUCTIVE and NOT idempotent — confirm with the user before calling. Returns the cancelled appointment.',
     parameters: z.object({
       tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
       appointmentId: z.string().min(1),
       cancelReason: z.string().min(1).optional(),
       cancelNote: z.string().max(150).optional(),
@@ -395,6 +410,7 @@ export class AppointmentTools {
   async cancel(
     args: {
       tenantId?: string;
+      actorRole?: ActorRole;
       appointmentId: string;
       cancelReason?: string;
       cancelNote?: string;
