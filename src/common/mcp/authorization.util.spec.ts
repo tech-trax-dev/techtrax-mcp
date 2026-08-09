@@ -82,6 +82,7 @@ describe('authorization.util', () => {
         expect(roleCan(role, 'lead:read')).toBe(true);
         expect(roleCan(role, 'lead:create')).toBe(true);
         expect(roleCan(role, 'lead:assign')).toBe(true);
+        expect(roleCan(role, 'lead:handoff')).toBe(true);
       }
     });
 
@@ -89,16 +90,18 @@ describe('authorization.util', () => {
       expect(roleCan('patient', 'lead:read')).toBe(false);
       expect(roleCan('patient', 'lead:create')).toBe(false);
       expect(roleCan('patient', 'lead:assign')).toBe(false);
+      expect(roleCan('patient', 'lead:handoff')).toBe(false);
     });
 
-    it('lead agents can route leads without reading patient or appointment data', () => {
+    it('lead agents can complete qualified handoffs without arbitrary assignment access', () => {
       expect(ROLE_CAPABILITIES.lead_agent).toEqual([
         'clinic:read',
         'slots:read',
         'lead:read',
-        'lead:assign',
+        'lead:handoff',
       ]);
-      expect(roleCan('lead_agent', 'lead:assign')).toBe(true);
+      expect(roleCan('lead_agent', 'lead:handoff')).toBe(true);
+      expect(roleCan('lead_agent', 'lead:assign')).toBe(false);
       expect(roleCan('lead_agent', 'lead:create')).toBe(false);
       expect(roleCan('lead_agent', 'patient:read')).toBe(false);
       expect(roleCan('lead_agent', 'appointment:read')).toBe(false);
@@ -122,6 +125,11 @@ describe('authorization.util', () => {
         'admin',
       ]);
       expect(rolesWithCapability('lead:assign')).toEqual([
+        'doctor',
+        'receptionist',
+        'admin',
+      ]);
+      expect(rolesWithCapability('lead:handoff')).toEqual([
         'doctor',
         'receptionist',
         'admin',

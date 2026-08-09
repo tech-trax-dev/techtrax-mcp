@@ -41,6 +41,7 @@ export const CAPABILITIES = [
   'lead:read', // CRM: list teams + members (for lead routing)
   'lead:create', // CRM: create a lead record
   'lead:assign', // CRM: assign an existing lead to a team/member
+  'lead:handoff', // CRM: store a qualified lead phone, assign, and hand off
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -56,6 +57,7 @@ const STAFF: Capability[] = [
   'lead:read',
   'lead:create',
   'lead:assign',
+  'lead:handoff',
 ];
 
 /**
@@ -78,7 +80,7 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly Capability[]> = {
   doctor: STAFF,
   receptionist: STAFF,
   admin: CAPABILITIES,
-  lead_agent: ['clinic:read', 'slots:read', 'lead:read', 'lead:assign'],
+  lead_agent: ['clinic:read', 'slots:read', 'lead:read', 'lead:handoff'],
 };
 
 const isActorRole = (value: unknown): value is ActorRole =>

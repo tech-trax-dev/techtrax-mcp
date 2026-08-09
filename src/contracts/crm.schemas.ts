@@ -59,6 +59,12 @@ export const LeadAssignmentOutputSchema = z.object({
   assignedAt: z.string().nullable(),
 });
 
+export const LeadHandoffOutputSchema = LeadAssignmentOutputSchema.extend({
+  conversationId: z.string(),
+  inboundMessageId: z.string(),
+  handoffStatus: z.enum(['pending', 'completed']),
+});
+
 export const ConversationContextOutputSchema = z.object({
   conversation: z.object({
     id: z.string(),
@@ -104,6 +110,7 @@ export const ConversationContextOutputSchema = z.object({
 export type TeamsListOutput = z.infer<typeof TeamsListOutputSchema>;
 export type TeamDetailOutput = z.infer<typeof TeamDetailOutputSchema>;
 export type LeadAssignmentOutput = z.infer<typeof LeadAssignmentOutputSchema>;
+export type LeadHandoffOutput = z.infer<typeof LeadHandoffOutputSchema>;
 export type ConversationContextOutput = z.infer<
   typeof ConversationContextOutputSchema
 >;
