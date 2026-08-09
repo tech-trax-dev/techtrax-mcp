@@ -18,11 +18,13 @@ import {
   TeamsListOutputSchema,
   TeamDetailOutputSchema,
   LeadAssignmentOutputSchema,
+  ConversationContextOutputSchema,
 } from '../../contracts/crm.schemas';
 import type {
   TeamsListOutput,
   TeamDetailOutput,
   LeadAssignmentOutput,
+  ConversationContextOutput,
 } from '../../contracts/crm.schemas';
 
 type OutputFormat = 'json' | 'markdown';
@@ -57,6 +59,54 @@ const WRITE_ANNOTATIONS = {
 @Injectable()
 export class CrmTools {
   constructor(private readonly backend: BackendHttpService) {}
+
+  @Tool({
+    name: 'crm.get_conversation_context',
+    description:
+      'Loads the existing Meta lead, current owner, conversation state, channel type, and recent messages in chronological order. Use this before routing a lead. The lead already exists: never call crm.create_lead for this conversation; use the returned lead.id with crm.assign_lead.',
+    parameters: z.object({
+      tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
+      conversationId: z.string().min(1),
+      messageLimit: z.number().int().min(1).max(50).default(20).optional(),
+      format: formatSchema.optional(),
+    }),
+    outputSchema: ConversationContextOutputSchema,
+    annotations: READ_ANNOTATIONS,
+  })
+  @RequireCapability('lead:read')
+  async getConversationContext(
+    args: {
+      tenantId?: string;
+      actorRole?: ActorRole;
+      conversationId: string;
+      messageLimit?: number;
+      format?: OutputFormat;
+    },
+    _context: unknown,
+    request?: ToolRequest,
+  ): Promise<McpToolResult> {
+    const tenantId = resolveTenantId(request, args);
+    if (!tenantId) return missingTenant();
+
+    try {
+      const data = await this.getWithTenantHeader<ConversationContextOutput>(
+        tenantId,
+        `/api/v1/mcp/crm/conversations/${encodeURIComponent(args.conversationId)}/context`,
+        { params: { messageLimit: args.messageLimit ?? 20 } },
+      );
+      return this.formatResult(data, args.format ?? 'json', (payload) =>
+        JSON.stringify(payload, null, 2),
+      );
+    } catch (e) {
+      if (e instanceof BackendException && e.status === 404) {
+        return errorResult('Conversation not found.');
+      }
+      return errorResult(
+        `Failed to load conversation context: ${(e as Error).message}`,
+      );
+    }
+  }
 
   @Tool({
     name: 'crm.create_lead',

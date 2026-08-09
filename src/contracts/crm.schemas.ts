@@ -59,6 +59,51 @@ export const LeadAssignmentOutputSchema = z.object({
   assignedAt: z.string().nullable(),
 });
 
+export const ConversationContextOutputSchema = z.object({
+  conversation: z.object({
+    id: z.string(),
+    status: z.string(),
+    language: z.string().nullable(),
+    intent: z.string().nullable(),
+    tags: z.array(z.string()),
+    priority: z.string(),
+    aiPausedAt: z.string().nullable(),
+  }),
+  lead: z.object({
+    id: z.string(),
+    firstName: z.string().nullable(),
+    lastName: z.string().nullable(),
+    phone: z.string().nullable(),
+    email: z.string().nullable(),
+    status: z.string().nullable(),
+  }),
+  assignment: z.object({
+    assignedTo: z
+      .object({
+        id: z.string(),
+        firstName: z.string().nullable(),
+        lastName: z.string().nullable(),
+      })
+      .nullable(),
+  }),
+  channel: z.object({ id: z.string(), type: z.string() }),
+  messages: z.array(
+    z.object({
+      messageId: z.string(),
+      direction: z.string(),
+      senderType: z.string(),
+      messageType: z.string(),
+      body: z.string().nullable().optional(),
+      interactiveReply: z.unknown().optional(),
+      sentAt: z.string().optional(),
+      createdAt: z.string().optional(),
+    }),
+  ),
+});
+
 export type TeamsListOutput = z.infer<typeof TeamsListOutputSchema>;
 export type TeamDetailOutput = z.infer<typeof TeamDetailOutputSchema>;
 export type LeadAssignmentOutput = z.infer<typeof LeadAssignmentOutputSchema>;
+export type ConversationContextOutput = z.infer<
+  typeof ConversationContextOutputSchema
+>;

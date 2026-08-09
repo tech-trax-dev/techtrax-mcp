@@ -4,6 +4,7 @@ import {
   TeamsListOutputSchema,
   TeamDetailOutputSchema,
   LeadAssignmentOutputSchema,
+  ConversationContextOutputSchema,
 } from '../../contracts/crm.schemas';
 import { CrmTools } from './crm.tools';
 
@@ -83,6 +84,71 @@ describe('CrmTools', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toMatch(/already exists/i);
       expect(result.structuredContent).toBeUndefined();
+    });
+  });
+
+  describe('get_conversation_context', () => {
+    it('loads schema-valid context with a trusted tenant header', async () => {
+      const payload = {
+        conversation: {
+          id: 'conversation1',
+          status: 'active',
+          language: 'ar',
+          intent: 'pricing',
+          tags: ['hot'],
+          priority: 'high',
+          aiPausedAt: null,
+        },
+        lead: {
+          id: 'lead1',
+          firstName: 'Mona',
+          lastName: 'Ali',
+          phone: '+201000000000',
+          email: null,
+          status: 'new',
+        },
+        assignment: { assignedTo: null },
+        channel: { id: 'channel1', type: 'facebook_messenger' },
+        messages: [
+          {
+            messageId: 'message1',
+            direction: 'inbound',
+            senderType: 'contact',
+            messageType: 'text',
+            body: 'Hello',
+            sentAt: '2026-08-09T10:00:00.000Z',
+          },
+        ],
+      };
+      backend.get.mockResolvedValue(payload);
+
+      const result = await tools.getConversationContext(
+        {
+          tenantId: 'b'.repeat(24),
+          actorRole: 'admin',
+          conversationId: 'conversation1',
+          messageLimit: 25,
+        },
+        undefined,
+        {
+          headers: {
+            'x-tenant-id': TENANT,
+            'x-actor-role': 'lead_agent',
+          },
+        },
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(() =>
+        ConversationContextOutputSchema.parse(result.structuredContent),
+      ).not.toThrow();
+      expect(backend.get).toHaveBeenCalledWith(
+        '/api/v1/mcp/crm/conversations/conversation1/context',
+        {
+          params: { messageLimit: 25 },
+          headers: { 'x-tenant-id': TENANT },
+        },
+      );
     });
   });
 
