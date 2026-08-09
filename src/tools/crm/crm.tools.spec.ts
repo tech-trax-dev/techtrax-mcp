@@ -19,6 +19,73 @@ describe('CrmTools', () => {
     tools = new CrmTools(backend as never);
   });
 
+  describe('create_lead', () => {
+    const leadPayload = {
+      id: 'lead9',
+      firstName: 'Mohammed',
+      lastName: 'Emam',
+      phone: '01204045635',
+      email: null,
+      assignedTo: null,
+      status: 'open',
+      assignedAt: null,
+    };
+
+    it('creates an unassigned lead and returns schema-valid output', async () => {
+      backend.post.mockResolvedValue(leadPayload);
+
+      const result = await tools.createLead(
+        {
+          tenantId: TENANT,
+          actorRole: 'admin',
+          firstName: 'Mohammed',
+          lastName: 'Emam',
+          phone: '01204045635',
+          address: 'Shubra Hares, Toukh, Qalyubia',
+        },
+        undefined,
+        req,
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(() =>
+        LeadAssignmentOutputSchema.parse(result.structuredContent),
+      ).not.toThrow();
+      expect(backend.post).toHaveBeenCalledWith(
+        '/api/v1/mcp/crm/leads',
+        {
+          firstName: 'Mohammed',
+          lastName: 'Emam',
+          phone: '01204045635',
+          email: undefined,
+          address: 'Shubra Hares, Toukh, Qalyubia',
+          priority: undefined,
+        },
+        { headers: { 'x-tenant-id': TENANT } },
+      );
+    });
+
+    it('maps a 409 duplicate to a friendly isError', async () => {
+      backend.post.mockRejectedValue(
+        new BackendException(409, 'Lead with this phone number already exists'),
+      );
+      const result = await tools.createLead(
+        {
+          tenantId: TENANT,
+          actorRole: 'admin',
+          firstName: 'Mohammed',
+          lastName: 'Emam',
+          phone: '01204045635',
+        },
+        undefined,
+        req,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/already exists/i);
+      expect(result.structuredContent).toBeUndefined();
+    });
+  });
+
   describe('list_teams', () => {
     it('returns schema-valid teams', async () => {
       const payload = {

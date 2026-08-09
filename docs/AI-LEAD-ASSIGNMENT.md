@@ -53,11 +53,14 @@ See `docs/MCP_TOOL_AUTHORIZATION.md` for the full authorization model.
 
 | # | Tool | Capability | Purpose |
 | --- | --- | --- | --- |
+| 0 | `crm.create_lead` | `lead:write` | Create a NEW (unassigned) lead from a conversation — only when the lead doesn't exist yet |
 | 1 | `crm.list_teams` | `lead:read` | List teams (**name + description**) to pick a `teamId` from |
 | 2 | `crm.get_team` | `lead:read` | Load a team's **team lead + members** (needed for member ids) |
-| 3 | `crm.assign_lead` | `lead:write` | (Re)assign the existing lead — the only **write** |
+| 3 | `crm.assign_lead` | `lead:write` | (Re)assign the lead — the assignment **write** |
 
 ```
+crm.create_lead  → new customer in a chat? create the lead (unassigned) → use its id below
+      │
 crm.list_teams   → read names/descriptions, pick a teamId
       │
       └─► crm.get_team     → teamLead + member ids   (only for "specific person")
@@ -65,9 +68,27 @@ crm.list_teams   → read names/descriptions, pick a teamId
       └─► crm.assign_lead  → assign using one of the 3 methods
 ```
 
-Step **2** is only needed when you want to assign to a **specific person** (you
-need their id). For "team lead" or "round-robin" you can go straight from
-`crm.list_teams` to `crm.assign_lead` with just the `teamId`.
+Step **0** is only for a **brand-new** lead (a customer who just shared their
+details in a conversation). A lead that already exists (created by an inbound
+message / opened conversation) skips straight to step 1. Step **2** is only
+needed to assign to a **specific person** (you need their id); for "team lead" or
+"round-robin" go straight from `crm.list_teams` to `crm.assign_lead` with the `teamId`.
+
+### 2.0 `crm.create_lead`
+
+Args: `tenantId` (or header), **`firstName`**, **`lastName`**, **`phone`** (required),
+plus optional `email`, `address` (their location), `priority` (`low`|`high`),
+`format?`.
+
+Creates the lead **unassigned** (system-reserved "Unassigned" team, no owner) and
+returns it — its `id` is the `leadId` you pass to `crm.assign_lead`. Leads are
+**de-duplicated by phone/email**: if an active lead already exists you get a
+`409 … already exists` (so you never create duplicates). Then continue with
+step 1 to route it.
+
+> Example: a customer writes *"محمد احمد محمد امام … شبرا هارس طوخ قليوبية … 01204045635"* →
+> `crm.create_lead { firstName: "محمد احمد", lastName: "محمد امام", phone: "01204045635", address: "شبرا هارس، طوخ، قليوبية" }`
+> → then `crm.list_teams` → `crm.assign_lead`.
 
 ### 2.1 `crm.list_teams`
 
@@ -210,6 +231,7 @@ own CRM services (no reimplemented queries):
 
 | Tool | Backend endpoint | Reuses |
 | --- | --- | --- |
+| `crm.create_lead` | `POST /api/v1/mcp/crm/leads` | `lead.service.createLead` (system create → Unassigned) |
 | `crm.list_teams` | `GET /api/v1/mcp/crm/teams` | `team.service.getAllTeams` |
 | `crm.get_team` | `GET /api/v1/mcp/crm/teams/:teamId` | `team.service.getTeamById` |
 | `crm.assign_lead` | `POST /api/v1/mcp/crm/leads/:leadId/assign` | `lead.service.assignLead` → `resolveLeadAssignee` |

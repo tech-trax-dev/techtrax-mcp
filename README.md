@@ -92,7 +92,7 @@ Policy lives in [`src/common/mcp/authorization.util.ts`](src/common/mcp/authoriz
 | `appointment:read` | `appointment.list_appointments` / `get_appointment` | ❌ | ✅ |
 | `statistics:read` | `statistics.*` | ❌ | ✅ |
 | `lead:read` | `crm.list_teams` / `crm.get_team` | ❌ | ✅ |
-| `lead:write` | `crm.assign_lead` | ❌ | ✅ |
+| `lead:write` | `crm.create_lead` / `crm.assign_lead` | ❌ | ✅ |
 
 Enforcement is **per-call**: a `@RequireCapability(...)` wrapper (in [`tool-authorization.guard.ts`](src/common/mcp/tool-authorization.guard.ts)) wraps each tool handler and checks the call's `actorRole` against the tool's capability. `tools/list` is **NOT** filtered — every tool is always listed — but calling one your role lacks returns an error result (`Not authorized: the '<role>' role cannot perform '<capability>'…`) with the backend never hit. Patients get the self-service set — browse the clinic/doctors/specialties, check slots, and manage their own appointments (book/reschedule/cancel). They cannot search the patient directory, list every appointment in the tenant, or view analytics. Edit `ROLE_CAPABILITIES` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts) (and each tool's `@RequireCapability(...)`) to adjust.
 

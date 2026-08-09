@@ -40,7 +40,7 @@ Because `actorRole` is a tool argument produced by the model, the **trusted clie
 | List / fetch any appointment in the clinic | `appointment.list_appointments` / `get_appointment` | ❌ | ✅ |
 | Tenant analytics | `statistics.*` | ❌ | ✅ |
 | CRM: list teams + members | `crm.list_teams` / `crm.get_team` (`lead:read`) | ❌ | ✅ |
-| CRM: assign a lead | `crm.assign_lead` (`lead:write`) | ❌ | ✅ |
+| CRM: create / assign a lead | `crm.create_lead` / `crm.assign_lead` (`lead:write`) | ❌ | ✅ |
 
 The role is only known at call time, so enforcement is **per-call** against each tool's capability:
 

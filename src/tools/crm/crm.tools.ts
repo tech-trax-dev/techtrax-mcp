@@ -46,15 +46,93 @@ const WRITE_ANNOTATIONS = {
 } as const;
 
 /**
- * CRM lead-assignment tools. Intended flow for the AI:
+ * CRM lead tools. Intended flow for the AI when a customer shares their details
+ * in a conversation:
+ *   0. crm.create_lead → create the new lead (unassigned) from their name/phone.
  *   1. crm.list_teams  → read each team's name + description, pick the team that
  *      best matches the lead's conversation.
  *   2. crm.get_team    → get that team's teamLead + members (ids + roles).
- *   3. crm.assign_lead → assign the existing lead to the chosen member or lead.
+ *   3. crm.assign_lead → assign the (just-created) lead to the chosen member/lead.
  */
 @Injectable()
 export class CrmTools {
   constructor(private readonly backend: BackendHttpService) {}
+
+  @Tool({
+    name: 'crm.create_lead',
+    description:
+      "Creates a NEW lead (customer record) from details gathered in a conversation — use this the moment a customer shares who they are (name + phone). It creates the lead UNASSIGNED (no owner yet); you then route it with crm.list_teams → crm.assign_lead. Required: firstName, lastName, phone. Optional: email, address (their location/area), priority. Leads are de-duplicated by phone (and email) within the tenant — if an active lead with that phone/email already exists the call fails (409 'already exists'), so you don't create duplicates. Returns the created lead (its `id` is what you pass as `leadId` to crm.assign_lead; `assignedTo` will be null until you assign it).",
+    parameters: z.object({
+      tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
+      firstName: z.string().min(1).describe("The customer's first name."),
+      lastName: z.string().min(1).describe("The customer's last name."),
+      phone: z
+        .string()
+        .min(1)
+        .describe(
+          'Phone number — digits, optional leading + (e.g. 01204045635 or +201204045635).',
+        ),
+      email: z.string().email().optional().describe('Optional email address.'),
+      address: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Optional location/address the customer mentioned (e.g. 'Shubra Hares, Toukh, Qalyubia').",
+        ),
+      priority: z
+        .enum(['low', 'high'])
+        .optional()
+        .describe('Optional lead priority. Defaults to low.'),
+      format: formatSchema.optional(),
+    }),
+    outputSchema: LeadAssignmentOutputSchema,
+    annotations: WRITE_ANNOTATIONS,
+  })
+  @RequireCapability('lead:write')
+  async createLead(
+    args: {
+      tenantId?: string;
+      actorRole?: ActorRole;
+      firstName: string;
+      lastName: string;
+      phone: string;
+      email?: string;
+      address?: string;
+      priority?: 'low' | 'high';
+      format?: OutputFormat;
+    },
+    _context: unknown,
+    request?: ToolRequest,
+  ): Promise<McpToolResult> {
+    const format = args.format ?? 'json';
+    const tenantId = resolveTenantId(request, args);
+    if (!tenantId) return missingTenant();
+
+    try {
+      const data = await this.postWithTenantHeader<LeadAssignmentOutput>(
+        tenantId,
+        '/api/v1/mcp/crm/leads',
+        {
+          firstName: args.firstName,
+          lastName: args.lastName,
+          phone: args.phone,
+          email: args.email,
+          address: args.address,
+          priority: args.priority,
+        },
+      );
+      return this.formatResult(data, format, (p) => this.renderCreatedLead(p));
+    } catch (e) {
+      if (e instanceof BackendException && e.status === 409) {
+        return errorResult(
+          `A lead with this phone or email already exists. ${(e as Error).message}`,
+        );
+      }
+      return errorResult(`Failed to create lead: ${(e as Error).message}`);
+    }
+  }
 
   @Tool({
     name: 'crm.list_teams',
@@ -325,6 +403,21 @@ export class CrmTools {
       `- **Assigned to:** ${data.assignedTo ?? 'unassigned'}`,
       `- **Status:** ${data.status ?? 'N/A'}`,
       `- **Assigned at:** ${data.assignedAt ?? 'N/A'}`,
+    ].join('\n');
+  }
+
+  private renderCreatedLead(data: LeadAssignmentOutput): string {
+    const name =
+      `${data.firstName ?? ''} ${data.lastName ?? ''}`.trim() || data.id;
+    return [
+      '# Lead created',
+      '',
+      `- **Lead:** ${name} (${data.id})`,
+      `- **Phone:** ${data.phone ?? 'N/A'}`,
+      `- **Status:** ${data.status ?? 'N/A'}`,
+      `- **Assigned to:** ${data.assignedTo ?? 'unassigned — route it with crm.assign_lead'}`,
+      '',
+      `Next: pick a team with crm.list_teams, then call crm.assign_lead with leadId=${data.id}.`,
     ].join('\n');
   }
 }

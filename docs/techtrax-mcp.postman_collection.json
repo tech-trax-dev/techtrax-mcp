@@ -320,6 +320,65 @@
       }
     },
     {
+      "name": "4c1. tools/call - crm.create_lead (step 0: new lead)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Capture the created lead id into {{leadId}} for the assign requests.",
+              "let d = pm.response.text().split('\n').find(l => l.startsWith('data:'));",
+              "try { const j = JSON.parse(d ? d.slice(5).trim() : pm.response.text());",
+              "  const sc = j.result && j.result.structuredContent;",
+              "  if (sc && sc.id) { pm.collectionVariables.set('leadId', sc.id); console.log('leadId =', sc.id); }",
+              "} catch (e) { console.warn('could not parse created lead id'); }"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{sessionId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 90,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"crm.create_lead\",\n    \"arguments\": {\n      \"tenantId\": \"{{tenantId}}\",\n      \"actorRole\": \"{{actorRole}}\",\n      \"firstName\": \"Mohammed Ahmed\",\n      \"lastName\": \"Mohamed Emam\",\n      \"phone\": \"01204045635\",\n      \"address\": \"Shubra Hares, Toukh, Qalyubia\",\n      \"format\": \"markdown\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "description": "CRM (lead:write, staff-only) — WRITE. Creates a NEW unassigned lead from conversation details (firstName/lastName/phone required; email/address/priority optional). De-duplicated by phone/email (409 if an active lead already exists). The Tests script captures the new lead id into {{leadId}} so the assign requests (4f/4g/4h) can route it. Then run crm.list_teams → crm.assign_lead."
+      }
+    },
+    {
       "name": "4d. tools/call - crm.list_teams (step 1 of lead assignment)",
       "request": {
         "method": "POST",
