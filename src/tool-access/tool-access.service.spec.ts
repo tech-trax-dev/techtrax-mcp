@@ -51,13 +51,25 @@ describe('ToolAccessService', () => {
     expect(pub).toEqual({
       name: 'fake.public',
       capability: null,
-      allowedRoles: ['patient', 'doctor', 'receptionist', 'admin'],
+      allowedRoles: [
+        'patient',
+        'doctor',
+        'receptionist',
+        'admin',
+        'lead_agent',
+      ],
     });
   });
 
   it('matrix groups tools by role', () => {
     const m = service.matrix();
-    expect(m.roles).toEqual(['patient', 'doctor', 'receptionist', 'admin']);
+    expect(m.roles).toEqual([
+      'patient',
+      'doctor',
+      'receptionist',
+      'admin',
+      'lead_agent',
+    ]);
     expect(m.toolsByRole.patient).toContain('fake.public');
     expect(m.toolsByRole.patient).not.toContain('fake.stats');
     expect(m.toolsByRole.receptionist).toEqual(

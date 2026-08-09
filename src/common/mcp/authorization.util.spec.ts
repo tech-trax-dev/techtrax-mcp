@@ -148,6 +148,8 @@ describe('RequireCapability decorator (per-call enforcement)', () => {
       _request?: { headers?: Record<string, string> },
     ): { ok: true } {
       void args;
+      void _context;
+      void _request;
       this.calls += 1;
       return { ok: true };
     }
