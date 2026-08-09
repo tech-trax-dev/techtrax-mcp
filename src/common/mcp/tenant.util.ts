@@ -13,6 +13,7 @@ export type ToolRequest = {
   user?: {
     tenantId?: string;
     tenant?: { id?: string };
+    role?: string;
   };
 };
 
@@ -38,18 +39,15 @@ export const tenantIdParam = z
 
 /**
  * Resolve the active tenant for a tool call. Precedence:
- *   1. Explicit `tenantId` tool argument (what AI models pass).
- *   2. An authenticated `request.user` (future auth).
- *   3. The `x-tenant-id` header (legacy transport, kept for back-compat).
+ *   1. An authenticated `request.user`.
+ *   2. The trusted `x-tenant-id` transport header.
+ *   3. Explicit `tenantId` tool argument (legacy clients only).
  * Returns a trimmed, non-empty id or null when no tenant context is present.
  */
 export const resolveTenantId = (
   request?: ToolRequest,
   args?: { tenantId?: string },
 ): string | null => {
-  const fromArgs = args?.tenantId?.trim();
-  if (fromArgs) return fromArgs;
-
   const fromUser = (
     request?.user?.tenantId ??
     request?.user?.tenant?.id ??
@@ -62,6 +60,9 @@ export const resolveTenantId = (
     return headerValue.trim();
   if (Array.isArray(headerValue) && headerValue[0]?.trim())
     return headerValue[0].trim();
+
+  const fromArgs = args?.tenantId?.trim();
+  if (fromArgs) return fromArgs;
 
   return null;
 };

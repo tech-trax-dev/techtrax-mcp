@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { errorResult } from './tool-response.util';
 import type { McpToolResult } from './tool-response.util';
+import type { ToolRequest } from './tenant.util';
 
 /**
  * Tool authorization for the MCP server.
@@ -33,6 +34,7 @@ export const ACTOR_ROLES = [
   'doctor',
   'receptionist',
   'admin',
+  'lead_agent',
 ] as const;
 export type ActorRole = (typeof ACTOR_ROLES)[number];
 
@@ -81,6 +83,7 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly Capability[]> = {
   doctor: STAFF,
   receptionist: STAFF,
   admin: CAPABILITIES,
+  lead_agent: ['clinic:read', 'slots:read', 'lead:read', 'lead:write'],
 };
 
 const isActorRole = (value: unknown): value is ActorRole =>
@@ -116,8 +119,15 @@ export const actorRoleParam = z
  * value is used as-is; an absent or unrecognised value falls back to
  * `DEFAULT_ACTOR_ROLE`, so the fallback is driven entirely by that one constant.
  */
-export const resolveActorRole = (args?: { actorRole?: unknown }): ActorRole => {
-  const raw = args?.actorRole;
+export const resolveActorRole = (
+  request?: ToolRequest,
+  args?: { actorRole?: unknown },
+): ActorRole => {
+  const headerValue = request?.headers?.['x-actor-role'];
+  const raw =
+    request?.user?.role ??
+    (Array.isArray(headerValue) ? headerValue[0] : headerValue) ??
+    args?.actorRole;
   const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   return isActorRole(normalized) ? normalized : DEFAULT_ACTOR_ROLE;
 };
@@ -136,10 +146,11 @@ export const rolesWithCapability = (capability: Capability): ActorRole[] =>
  * `null` to proceed.
  */
 export const authorize = (
+  request: ToolRequest | undefined,
   args: { actorRole?: unknown } | undefined,
   capability: Capability,
 ): McpToolResult | null => {
-  const role = resolveActorRole(args);
+  const role = resolveActorRole(request, args);
   if (roleCan(role, capability)) return null;
   return errorResult(
     `Not authorized: the '${role}' role cannot perform '${capability}'. ` +

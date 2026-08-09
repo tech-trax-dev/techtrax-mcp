@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { authorize } from './authorization.util';
 import type { Capability } from './authorization.util';
+import type { ToolRequest } from './tenant.util';
 
 /**
  * Capability-based tool authorization.
@@ -38,7 +39,8 @@ export const RequireCapability = (capability: Capability): MethodDecorator => {
 
     const wrapped = function (this: unknown, ...callArgs: unknown[]): unknown {
       const toolArgs = callArgs[0] as { actorRole?: unknown } | undefined;
-      const denied = authorize(toolArgs, capability);
+      const request = callArgs[2] as ToolRequest | undefined;
+      const denied = authorize(request, toolArgs, capability);
       if (denied) return denied;
       return original.apply(this, callArgs) as unknown;
     };

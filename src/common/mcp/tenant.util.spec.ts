@@ -4,15 +4,15 @@ const ARG_TENANT = '64b7f0000000000000000002';
 const CTX_TENANT = '64b7f0000000000000000001';
 
 describe('resolveTenantId', () => {
-  it('prefers the tenantId tool argument over user and header', () => {
+  it('prefers trusted user tenant over header and tool argument', () => {
     const resolved = resolveTenantId(
       {
         user: { tenantId: CTX_TENANT },
-        headers: { 'x-tenant-id': CTX_TENANT },
+        headers: { 'x-tenant-id': ARG_TENANT },
       },
       { tenantId: ARG_TENANT },
     );
-    expect(resolved).toBe(ARG_TENANT);
+    expect(resolved).toBe(CTX_TENANT);
   });
 
   it('falls back to request.user when no argument is given', () => {
@@ -25,9 +25,12 @@ describe('resolveTenantId', () => {
   });
 
   it('falls back to the x-tenant-id header (string or array)', () => {
-    expect(resolveTenantId({ headers: { 'x-tenant-id': CTX_TENANT } })).toBe(
-      CTX_TENANT,
-    );
+    expect(
+      resolveTenantId(
+        { headers: { 'x-tenant-id': CTX_TENANT } },
+        { tenantId: ARG_TENANT },
+      ),
+    ).toBe(CTX_TENANT);
     expect(resolveTenantId({ headers: { 'x-tenant-id': [CTX_TENANT] } })).toBe(
       CTX_TENANT,
     );
