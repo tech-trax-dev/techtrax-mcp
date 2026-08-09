@@ -21,10 +21,8 @@ export type ToolRequest = {
 const OBJECT_ID = /^[a-f\d]{24}$/i;
 
 /**
- * Shared `tenantId` tool parameter. Every tool exposes this so an AI model can
- * pass the tenant explicitly in the call arguments and get a clear validation
- * error on a malformed value. Optional at the schema level so clients that
- * still supply the tenant via the `x-tenant-id` header keep working.
+ * Development compatibility parameter. Production requires trusted request
+ * identity or the `x-tenant-id` header and ignores this model-produced value.
  */
 export const tenantIdParam = z
   .string()
@@ -32,8 +30,7 @@ export const tenantIdParam = z
   .regex(OBJECT_ID, 'tenantId must be a 24-character hex id (MongoDB ObjectId)')
   .describe(
     'The tenant (clinic) to act on, as a 24-character hex id. Pass this on ' +
-      'every call. May be omitted only when the client supplies the tenant ' +
-      'via the x-tenant-id header.',
+      'development call. Production clients must supply x-tenant-id.',
   )
   .optional();
 
@@ -61,6 +58,7 @@ export const resolveTenantId = (
   if (Array.isArray(headerValue) && headerValue[0]?.trim())
     return headerValue[0].trim();
 
+  if (process.env.NODE_ENV === 'production') return null;
   const fromArgs = args?.tenantId?.trim();
   if (fromArgs) return fromArgs;
 

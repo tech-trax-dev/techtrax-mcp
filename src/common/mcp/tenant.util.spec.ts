@@ -49,6 +49,16 @@ describe('resolveTenantId', () => {
     expect(resolveTenantId({}, {})).toBeNull();
     expect(resolveTenantId()).toBeNull();
   });
+
+  it('does not trust a model-supplied tenant in production', () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      expect(resolveTenantId(undefined, { tenantId: ARG_TENANT })).toBeNull();
+    } finally {
+      process.env.NODE_ENV = previous;
+    }
+  });
 });
 
 describe('tenantIdParam', () => {

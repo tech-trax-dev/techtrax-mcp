@@ -20,8 +20,7 @@ const isActorRole = (v: unknown): v is ActorRole =>
  *                                 plus each role's tool list + capabilities)
  *   GET /tool-access?role=patient → just the tools that one role may call
  *
- * This is read-only policy metadata (no PHI). It exists because, with the role
- * passed as a per-call `actorRole` argument, `tools/list` is not role-filtered —
+ * This is read-only policy metadata (no PHI). `tools/list` is not role-filtered,
  * so this endpoint is how a client discovers "which role can use which tool".
  *
  * Guarded by `McpClientGuard` for parity with the `/mcp` endpoint: it requires

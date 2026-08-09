@@ -10,7 +10,7 @@ three assignment methods the app's create-lead flow uses.
 
 It covers:
 
-1. Session setup (headers + per-call `actorRole` argument) — required before any CRM call succeeds.
+1. Session setup (trusted headers) — required before any CRM call succeeds.
 2. The three tools, the order to call them, and what each returns.
 3. The 3 assignment methods and how each maps to `crm.assign_lead` arguments.
 4. How "round-robin" is resolved (load-aware, same engine as create).
@@ -18,26 +18,21 @@ It covers:
 
 ---
 
-## 1. Session setup (headers + per-call `actorRole` argument)
+## 1. Session setup (trusted headers)
 
-Every CRM call is scoped by request headers **and** the `actorRole` argument your
-**client** injects into each `tools/call` (never the AI model).
+Every production CRM call is scoped by trusted request headers supplied by the
+client, never by the AI model.
 
 | Where | Name | Purpose | Example |
 | --- | --- | --- | --- |
 | Header | `x-api-key` | Authenticates the client | `x-api-key: <MCP_CLIENT_API_KEY>` |
 | Header | `x-tenant-id` | Which clinic/workspace to act on (24-hex id) | `x-tenant-id: 6935b6ea…` |
-| `tools/call` argument | `actorRole` | Who the AI acts as (per call) — **must be staff for CRM** | `"actorRole": "receptionist"` |
+| Header | `x-actor-role` | Who the AI acts as — **must be staff or `lead_agent` for CRM** | `x-actor-role: receptionist` |
 
-- Pass `actorRole` in the `arguments` of **every** `tools/call` (exactly like
-  `tenantId`). It is a per-call argument, **not** set at `initialize` and **not**
-  a header. Allowed values: `patient` | `doctor` | `receptionist` | `admin`.
-  ```jsonc
-  { "method": "tools/call",
-    "params": { "name": "crm.list_teams",
-                "arguments": { "tenantId": "6935b6ea…", "actorRole": "receptionist" } } }
-  ```
-- The CRM tools require `lead:read` / `lead:write`, held by **`receptionist`,
+- Pin `x-tenant-id` and `x-actor-role` on the trusted MCP connection. Production
+  ignores model-supplied identity arguments. Development retains them only as a
+  compatibility fallback.
+- The CRM tools require `lead:read`, `lead:create`, or `lead:assign`, held by **`receptionist`,
   `doctor`, `admin`**. The default role is `patient` (omitted/unknown →
   `patient`), so you **must** inject a staff role into each CRM call — a call with
   `actorRole: patient` (or none) is **rejected**. Note `tools/list` is **not**
@@ -53,10 +48,10 @@ See `docs/MCP_TOOL_AUTHORIZATION.md` for the full authorization model.
 
 | # | Tool | Capability | Purpose |
 | --- | --- | --- | --- |
-| 0 | `crm.create_lead` | `lead:write` | Create a NEW (unassigned) lead from a conversation — only when the lead doesn't exist yet |
+| 0 | `crm.create_lead` | `lead:create` | Create a NEW (unassigned) lead from a conversation — only when the lead doesn't exist yet |
 | 1 | `crm.list_teams` | `lead:read` | List teams (**name + description**) to pick a `teamId` from |
 | 2 | `crm.get_team` | `lead:read` | Load a team's **team lead + members** (needed for member ids) |
-| 3 | `crm.assign_lead` | `lead:write` | (Re)assign the lead — the assignment **write** |
+| 3 | `crm.assign_lead` | `lead:assign` | (Re)assign the lead — the assignment **write** |
 
 ```
 crm.create_lead  → new customer in a chat? create the lead (unassigned) → use its id below

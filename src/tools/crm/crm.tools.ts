@@ -12,7 +12,10 @@ import {
 } from '../../common/mcp/tenant.util';
 import type { ToolRequest } from '../../common/mcp/tenant.util';
 import { RequireCapability } from '../../common/mcp/tool-authorization.guard';
-import { actorRoleParam } from '../../common/mcp/authorization.util';
+import {
+  actorRoleParam,
+  resolveActorRole,
+} from '../../common/mcp/authorization.util';
 import type { ActorRole } from '../../common/mcp/authorization.util';
 import {
   TeamsListOutputSchema,
@@ -95,7 +98,8 @@ export class CrmTools {
         `/api/v1/mcp/crm/conversations/${encodeURIComponent(args.conversationId)}/context`,
         { params: { messageLimit: args.messageLimit ?? 20 } },
       );
-      return this.formatResult(data, args.format ?? 'json', (payload) =>
+      const parsed = ConversationContextOutputSchema.parse(data);
+      return this.formatResult(parsed, args.format ?? 'json', (payload) =>
         JSON.stringify(payload, null, 2),
       );
     } catch (e) {
@@ -140,7 +144,7 @@ export class CrmTools {
     outputSchema: LeadAssignmentOutputSchema,
     annotations: WRITE_ANNOTATIONS,
   })
-  @RequireCapability('lead:write')
+  @RequireCapability('lead:create')
   async createLead(
     args: {
       tenantId?: string;
@@ -331,7 +335,7 @@ export class CrmTools {
     outputSchema: LeadAssignmentOutputSchema,
     annotations: WRITE_ANNOTATIONS,
   })
-  @RequireCapability('lead:write')
+  @RequireCapability('lead:assign')
   async assignLead(
     args: {
       tenantId?: string;
@@ -369,7 +373,10 @@ export class CrmTools {
           assignedTo: args.assignedTo,
           teamId: args.teamId,
           isRoundRobin: args.isRoundRobin,
-          actorUserId: args.actorUserId,
+          actorUserId:
+            resolveActorRole(request, args) === 'lead_agent'
+              ? undefined
+              : args.actorUserId,
         },
       );
       return this.formatResult(data, format, (p) => this.renderLead(p));

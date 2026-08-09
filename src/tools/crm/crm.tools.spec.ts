@@ -117,8 +117,10 @@ describe('CrmTools', () => {
             messageType: 'text',
             body: 'Hello',
             sentAt: '2026-08-09T10:00:00.000Z',
+            aiReply: { content: 'must be stripped' },
           },
         ],
+        internalDebug: 'must be stripped',
       };
       backend.get.mockResolvedValue(payload);
 
@@ -139,6 +141,10 @@ describe('CrmTools', () => {
       );
 
       expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).not.toHaveProperty('internalDebug');
+      expect(
+        (result.structuredContent as { messages: unknown[] }).messages[0],
+      ).not.toHaveProperty('aiReply');
       expect(() =>
         ConversationContextOutputSchema.parse(result.structuredContent),
       ).not.toThrow();
@@ -317,6 +323,30 @@ describe('CrmTools', () => {
           isRoundRobin: true,
           actorUserId: undefined,
         },
+        { headers: { 'x-tenant-id': TENANT } },
+      );
+    });
+
+    it('does not let a lead agent attribute assignment to a human user', async () => {
+      backend.post.mockResolvedValue(leadPayload);
+
+      await tools.assignLead(
+        {
+          tenantId: TENANT,
+          actorRole: 'admin',
+          leadId: 'lead1',
+          teamId: 't1',
+          actorUserId: 'spoofed-user',
+        },
+        undefined,
+        {
+          headers: { 'x-tenant-id': TENANT, 'x-actor-role': 'lead_agent' },
+        },
+      );
+
+      expect(backend.post).toHaveBeenCalledWith(
+        '/api/v1/mcp/crm/leads/lead1/assign',
+        expect.objectContaining({ actorUserId: undefined }),
         { headers: { 'x-tenant-id': TENANT } },
       );
     });

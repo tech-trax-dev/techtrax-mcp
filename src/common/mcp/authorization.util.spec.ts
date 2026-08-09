@@ -47,6 +47,18 @@ describe('authorization.util', () => {
         ),
       ).toBe('lead_agent');
     });
+
+    it('does not trust a model-supplied elevated role in production', () => {
+      const previous = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        expect(resolveActorRole(undefined, { actorRole: 'admin' })).toBe(
+          'patient',
+        );
+      } finally {
+        process.env.NODE_ENV = previous;
+      }
+    });
   });
 
   describe('policy', () => {
@@ -68,13 +80,15 @@ describe('authorization.util', () => {
         expect(roleCan(role, 'statistics:read')).toBe(true);
         expect(roleCan(role, 'patient:read')).toBe(true);
         expect(roleCan(role, 'lead:read')).toBe(true);
-        expect(roleCan(role, 'lead:write')).toBe(true);
+        expect(roleCan(role, 'lead:create')).toBe(true);
+        expect(roleCan(role, 'lead:assign')).toBe(true);
       }
     });
 
     it('patients cannot touch CRM leads', () => {
       expect(roleCan('patient', 'lead:read')).toBe(false);
-      expect(roleCan('patient', 'lead:write')).toBe(false);
+      expect(roleCan('patient', 'lead:create')).toBe(false);
+      expect(roleCan('patient', 'lead:assign')).toBe(false);
     });
 
     it('lead agents can route leads without reading patient or appointment data', () => {
@@ -82,9 +96,10 @@ describe('authorization.util', () => {
         'clinic:read',
         'slots:read',
         'lead:read',
-        'lead:write',
+        'lead:assign',
       ]);
-      expect(roleCan('lead_agent', 'lead:write')).toBe(true);
+      expect(roleCan('lead_agent', 'lead:assign')).toBe(true);
+      expect(roleCan('lead_agent', 'lead:create')).toBe(false);
       expect(roleCan('lead_agent', 'patient:read')).toBe(false);
       expect(roleCan('lead_agent', 'appointment:read')).toBe(false);
       expect(roleCan('lead_agent', 'appointment:write')).toBe(false);
@@ -106,11 +121,16 @@ describe('authorization.util', () => {
         'receptionist',
         'admin',
       ]);
-      expect(rolesWithCapability('lead:write')).toEqual([
+      expect(rolesWithCapability('lead:assign')).toEqual([
         'doctor',
         'receptionist',
         'admin',
         'lead_agent',
+      ]);
+      expect(rolesWithCapability('lead:create')).toEqual([
+        'doctor',
+        'receptionist',
+        'admin',
       ]);
     });
   });
