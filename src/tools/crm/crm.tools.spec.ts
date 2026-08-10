@@ -4,6 +4,8 @@ import {
   TeamsListOutputSchema,
   TeamDetailOutputSchema,
   LeadAssignmentOutputSchema,
+  ConversationContextOutputSchema,
+  LeadHandoffOutputSchema,
 } from '../../contracts/crm.schemas';
 import { CrmTools } from './crm.tools';
 
@@ -83,6 +85,77 @@ describe('CrmTools', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toMatch(/already exists/i);
       expect(result.structuredContent).toBeUndefined();
+    });
+  });
+
+  describe('get_conversation_context', () => {
+    it('loads schema-valid context with a trusted tenant header', async () => {
+      const payload = {
+        conversation: {
+          id: 'conversation1',
+          status: 'active',
+          language: 'ar',
+          intent: 'pricing',
+          tags: ['hot'],
+          priority: 'high',
+          aiPausedAt: null,
+        },
+        lead: {
+          id: 'lead1',
+          firstName: 'Mona',
+          lastName: 'Ali',
+          phone: '+201000000000',
+          email: null,
+          status: 'new',
+        },
+        assignment: { assignedTo: null },
+        channel: { id: 'channel1', type: 'facebook_messenger' },
+        messages: [
+          {
+            messageId: 'message1',
+            direction: 'inbound',
+            senderType: 'contact',
+            messageType: 'text',
+            body: 'Hello',
+            sentAt: '2026-08-09T10:00:00.000Z',
+            aiReply: { content: 'must be stripped' },
+          },
+        ],
+        internalDebug: 'must be stripped',
+      };
+      backend.get.mockResolvedValue(payload);
+
+      const result = await tools.getConversationContext(
+        {
+          tenantId: 'b'.repeat(24),
+          actorRole: 'admin',
+          conversationId: 'conversation1',
+          messageLimit: 25,
+        },
+        undefined,
+        {
+          headers: {
+            'x-tenant-id': TENANT,
+            'x-actor-role': 'lead_agent',
+          },
+        },
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).not.toHaveProperty('internalDebug');
+      expect(
+        (result.structuredContent as { messages: unknown[] }).messages[0],
+      ).not.toHaveProperty('aiReply');
+      expect(() =>
+        ConversationContextOutputSchema.parse(result.structuredContent),
+      ).not.toThrow();
+      expect(backend.get).toHaveBeenCalledWith(
+        '/api/v1/mcp/crm/conversations/conversation1/context',
+        {
+          params: { messageLimit: 25 },
+          headers: { 'x-tenant-id': TENANT },
+        },
+      );
     });
   });
 
@@ -255,6 +328,28 @@ describe('CrmTools', () => {
       );
     });
 
+    it('does not let a lead agent use the generic assignment tool', async () => {
+      backend.post.mockResolvedValue(leadPayload);
+
+      const result = await tools.assignLead(
+        {
+          tenantId: TENANT,
+          actorRole: 'admin',
+          leadId: 'lead1',
+          teamId: 't1',
+          actorUserId: 'spoofed-user',
+        },
+        undefined,
+        {
+          headers: { 'x-tenant-id': TENANT, 'x-actor-role': 'lead_agent' },
+        },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/not authorized/i);
+      expect(backend.post).not.toHaveBeenCalled();
+    });
+
     it('rejects when neither assignedTo nor teamId is given (no backend call)', async () => {
       const result = await tools.assignLead(
         { tenantId: TENANT, actorRole: 'admin', leadId: 'lead1' },
@@ -300,6 +395,129 @@ describe('CrmTools', () => {
       );
       expect(result.isError).toBe(true);
       expect(result.structuredContent).toBeUndefined();
+    });
+  });
+
+  describe('qualify_and_handoff', () => {
+    it('stores the phone and routes the current conversation through one backend call', async () => {
+      const payload = {
+        id: 'lead1',
+        firstName: 'Jane',
+        lastName: 'Doe',
+        phone: '+201012345678',
+        email: null,
+        assignedTo: 'u2',
+        status: 'open',
+        assignedAt: '2026-08-10T10:00:00.000Z',
+        conversationId: 'conversation1',
+        inboundMessageId: 'message1',
+        handoffStatus: 'pending',
+      };
+      backend.post.mockResolvedValue(payload);
+
+      const result = await tools.qualifyAndHandoff(
+        {
+          tenantId: 'b'.repeat(24),
+          actorRole: 'admin',
+          conversationId: 'conversation1',
+          inboundMessageId: 'message1',
+          phone: '+201012345678',
+          assignedTo: 'u2',
+          teamId: 'team1',
+        },
+        undefined,
+        {
+          headers: {
+            'x-tenant-id': TENANT,
+            'x-actor-role': 'lead_agent',
+          },
+        },
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(() =>
+        LeadHandoffOutputSchema.parse(result.structuredContent),
+      ).not.toThrow();
+      expect(backend.post).toHaveBeenCalledWith(
+        '/api/v1/mcp/crm/conversations/conversation1/qualify-and-handoff',
+        {
+          inboundMessageId: 'message1',
+          phone: '+201012345678',
+          assignedTo: 'u2',
+          teamId: 'team1',
+        },
+        { headers: { 'x-tenant-id': TENANT } },
+      );
+    });
+
+    it('rejects a handoff without an assignment target', async () => {
+      const result = await tools.qualifyAndHandoff(
+        {
+          conversationId: 'conversation1',
+          inboundMessageId: 'message1',
+          phone: '+201012345678',
+          assignedTo: undefined as never,
+          teamId: 'team1',
+        },
+        undefined,
+        {
+          headers: {
+            'x-tenant-id': TENANT,
+            'x-actor-role': 'lead_agent',
+          },
+        },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(backend.post).not.toHaveBeenCalled();
+    });
+
+    it('uses trusted run headers instead of model-provided turn ids in production', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      backend.post.mockResolvedValue({
+        id: 'lead1',
+        firstName: null,
+        lastName: null,
+        phone: '+201012345678',
+        email: null,
+        assignedTo: 'u2',
+        status: 'open',
+        assignedAt: null,
+        conversationId: 'trusted-conversation',
+        inboundMessageId: 'trusted-message',
+        handoffStatus: 'pending',
+      });
+
+      try {
+        await tools.qualifyAndHandoff(
+          {
+            conversationId: 'spoofed-conversation',
+            inboundMessageId: 'spoofed-message',
+            phone: '+201012345678',
+            assignedTo: 'u2',
+            teamId: 'team1',
+          },
+          undefined,
+          {
+            headers: {
+              'x-tenant-id': TENANT,
+              'x-actor-role': 'lead_agent',
+              'x-conversation-id': 'trusted-conversation',
+              'x-inbound-message-id': 'trusted-message',
+            },
+          },
+        );
+
+        expect(backend.post).toHaveBeenCalledWith(
+          '/api/v1/mcp/crm/conversations/trusted-conversation/qualify-and-handoff',
+          expect.objectContaining({ inboundMessageId: 'trusted-message' }),
+          { headers: { 'x-tenant-id': TENANT } },
+        );
+      } finally {
+        if (originalEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = originalEnv;
+      }
     });
   });
 });

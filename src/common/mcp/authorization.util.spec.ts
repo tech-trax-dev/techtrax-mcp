@@ -12,19 +12,52 @@ import {
 } from './tool-authorization.guard';
 
 describe('authorization.util', () => {
-  describe('resolveActorRole (from the actorRole argument)', () => {
+  describe('resolveActorRole', () => {
     it('reads a valid actorRole (case/space-insensitive)', () => {
-      expect(resolveActorRole({ actorRole: 'Patient' })).toBe('patient');
-      expect(resolveActorRole({ actorRole: ' admin ' })).toBe('admin');
+      expect(resolveActorRole(undefined, { actorRole: 'Patient' })).toBe(
+        'patient',
+      );
+      expect(resolveActorRole(undefined, { actorRole: ' admin ' })).toBe(
+        'admin',
+      );
     });
 
     it('collapses an unknown role to the least-privileged patient (fail closed)', () => {
-      expect(resolveActorRole({ actorRole: 'superuser' })).toBe('patient');
+      expect(resolveActorRole(undefined, { actorRole: 'superuser' })).toBe(
+        'patient',
+      );
     });
 
     it('falls back to least-privilege patient when omitted', () => {
-      expect(resolveActorRole({})).toBe('patient');
-      expect(resolveActorRole(undefined)).toBe('patient');
+      expect(resolveActorRole(undefined, {})).toBe('patient');
+      expect(resolveActorRole()).toBe('patient');
+    });
+
+    it('prefers trusted user and header roles over the model argument', () => {
+      expect(
+        resolveActorRole(
+          { user: { role: 'lead_agent' } },
+          { actorRole: 'admin' },
+        ),
+      ).toBe('lead_agent');
+      expect(
+        resolveActorRole(
+          { headers: { 'x-actor-role': 'lead_agent' } },
+          { actorRole: 'admin' },
+        ),
+      ).toBe('lead_agent');
+    });
+
+    it('does not trust a model-supplied elevated role in production', () => {
+      const previous = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        expect(resolveActorRole(undefined, { actorRole: 'admin' })).toBe(
+          'patient',
+        );
+      } finally {
+        process.env.NODE_ENV = previous;
+      }
     });
   });
 
@@ -47,13 +80,33 @@ describe('authorization.util', () => {
         expect(roleCan(role, 'statistics:read')).toBe(true);
         expect(roleCan(role, 'patient:read')).toBe(true);
         expect(roleCan(role, 'lead:read')).toBe(true);
-        expect(roleCan(role, 'lead:write')).toBe(true);
+        expect(roleCan(role, 'lead:create')).toBe(true);
+        expect(roleCan(role, 'lead:assign')).toBe(true);
+        expect(roleCan(role, 'lead:handoff')).toBe(true);
       }
     });
 
     it('patients cannot touch CRM leads', () => {
       expect(roleCan('patient', 'lead:read')).toBe(false);
-      expect(roleCan('patient', 'lead:write')).toBe(false);
+      expect(roleCan('patient', 'lead:create')).toBe(false);
+      expect(roleCan('patient', 'lead:assign')).toBe(false);
+      expect(roleCan('patient', 'lead:handoff')).toBe(false);
+    });
+
+    it('lead agents can complete qualified handoffs without arbitrary assignment access', () => {
+      expect(ROLE_CAPABILITIES.lead_agent).toEqual([
+        'clinic:read',
+        'slots:read',
+        'lead:read',
+        'lead:handoff',
+      ]);
+      expect(roleCan('lead_agent', 'lead:handoff')).toBe(true);
+      expect(roleCan('lead_agent', 'lead:assign')).toBe(false);
+      expect(roleCan('lead_agent', 'lead:create')).toBe(false);
+      expect(roleCan('lead_agent', 'patient:read')).toBe(false);
+      expect(roleCan('lead_agent', 'appointment:read')).toBe(false);
+      expect(roleCan('lead_agent', 'appointment:write')).toBe(false);
+      expect(roleCan('lead_agent', 'statistics:read')).toBe(false);
     });
   });
 
@@ -64,13 +117,25 @@ describe('authorization.util', () => {
         'doctor',
         'receptionist',
         'admin',
+        'lead_agent',
       ]);
       expect(rolesWithCapability('statistics:read')).toEqual([
         'doctor',
         'receptionist',
         'admin',
       ]);
-      expect(rolesWithCapability('lead:write')).toEqual([
+      expect(rolesWithCapability('lead:assign')).toEqual([
+        'doctor',
+        'receptionist',
+        'admin',
+      ]);
+      expect(rolesWithCapability('lead:handoff')).toEqual([
+        'doctor',
+        'receptionist',
+        'admin',
+        'lead_agent',
+      ]);
+      expect(rolesWithCapability('lead:create')).toEqual([
         'doctor',
         'receptionist',
         'admin',
@@ -80,15 +145,21 @@ describe('authorization.util', () => {
 
   describe('authorize', () => {
     it('returns an error result (isError) when the role lacks the capability', () => {
-      const denied = authorize({ actorRole: 'patient' }, 'statistics:read');
+      const denied = authorize(
+        undefined,
+        { actorRole: 'patient' },
+        'statistics:read',
+      );
       expect(denied?.isError).toBe(true);
       expect(denied?.content[0].text).toMatch(/not authorized/i);
     });
 
     it('returns null (proceed) when the role holds the capability', () => {
-      expect(authorize({ actorRole: 'patient' }, 'clinic:read')).toBeNull();
       expect(
-        authorize({ actorRole: 'receptionist' }, 'statistics:read'),
+        authorize(undefined, { actorRole: 'patient' }, 'clinic:read'),
+      ).toBeNull();
+      expect(
+        authorize(undefined, { actorRole: 'receptionist' }, 'statistics:read'),
       ).toBeNull();
     });
   });
@@ -99,8 +170,14 @@ describe('RequireCapability decorator (per-call enforcement)', () => {
     calls = 0;
 
     @RequireCapability('statistics:read')
-    run(args: { actorRole?: string }): { ok: true } {
+    run(
+      args: { actorRole?: string },
+      _context?: unknown,
+      _request?: { headers?: Record<string, string> },
+    ): { ok: true } {
       void args;
+      void _context;
+      void _request;
       this.calls += 1;
       return { ok: true };
     }
@@ -133,6 +210,15 @@ describe('RequireCapability decorator (per-call enforcement)', () => {
   it('blocks when actorRole is omitted (defaults to patient)', () => {
     const host = new Host();
     const result = host.run({}) as unknown as { isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(host.calls).toBe(0);
+  });
+
+  it('uses the trusted request role instead of the model argument', () => {
+    const host = new Host();
+    const result = host.run({ actorRole: 'admin' }, undefined, {
+      headers: { 'x-actor-role': 'lead_agent' },
+    }) as unknown as { isError?: boolean };
     expect(result.isError).toBe(true);
     expect(host.calls).toBe(0);
   });

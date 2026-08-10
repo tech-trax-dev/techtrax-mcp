@@ -37,13 +37,12 @@ Rules that make this work:
 > **Why:** when the app changes how doctors are listed, MCP inherits it for free.
 > One query, one place.
 
-### B. Role-based authorization (per-call `actorRole` argument)
+### B. Role-based authorization
 
-Every tool declares a **capability**; the caller passes a **role** as a per-call
-`actorRole` argument in each `tools/call`'s `arguments` (exactly like `tenantId`).
-The `@RequireCapability(...)` wrapper around each tool handler reads that argument
-and checks it against the tool's capability. The role is only known at call time,
-so enforcement is **per-call**:
+Every tool declares a **capability**. In production, the trusted client supplies
+role and tenant through `x-actor-role` and `x-tenant-id`; model-produced identity
+arguments are ignored. The `@RequireCapability(...)` wrapper resolves the trusted
+role and checks it against the tool's capability per call:
 
 - **`tools/list`** — **NOT filtered**; every tool is always listed for every caller (the role isn't known until a tool is called).
 - **`tools/call`** — the wrapper rejects a call whose `actorRole` lacks the tool's capability; the backend is never hit.
@@ -63,15 +62,12 @@ Key files:
 
 Security invariants (don't violate these):
 
-- **Role comes from the `actorRole` tool argument**, which the trusted client
-  should inject into each call (like `tenantId`) rather than letting the model
-  choose. A patient-facing client should hard-pin `actorRole: 'patient'` so the
-  model cannot self-elevate. `actorRole` is authorization *scoping* for a trusted
-  client, not authentication — the real gate is `x-api-key`.
+- **Role comes from trusted request identity or `x-actor-role` in production.**
+  The API key authenticates the client; tenant and role headers scope its calls.
 - **Default is `patient`** (`DEFAULT_ACTOR_ROLE`) — least privilege / fail-closed.
   An omitted or unknown role value resolves to `patient`, so a staff-facing
-  client MUST inject an explicit staff role (`receptionist` / `doctor` / `admin`)
-  into each call to reach staff tools.
+  client must send an explicit trusted staff role (`receptionist` / `doctor` /
+  `admin`) to reach staff tools.
 - **`tools/list` is NOT filtered** — every tool is always listed; the per-call
   `@RequireCapability` check is the only gate. Use `GET /tool-access` to discover
   which role can call which tool.
@@ -141,7 +137,7 @@ In `techtrax-backend`:
    that should use it have it in `ROLE_CAPABILITIES`.
    ```ts
    @Tool({ name: 'crm.assign_lead', /* … */ })
-   @RequireCapability('lead:write')
+   @RequireCapability('lead:assign')
    async assignLead(args, _ctx, request) { /* … */ }
    ```
    Without `@RequireCapability`, the tool is **unrestricted** (visible/callable by

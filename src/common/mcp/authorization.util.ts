@@ -1,28 +1,22 @@
 import { z } from 'zod';
 import { errorResult } from './tool-response.util';
 import type { McpToolResult } from './tool-response.util';
+import type { ToolRequest } from './tenant.util';
 
 /**
  * Tool authorization for the MCP server.
  *
- * The caller's role is passed as an `actorRole` tool **argument** — the same way
- * `tenantId` is passed — on each `tools/call`. A patient-facing client sends
- * `actorRole: 'patient'`; a staff/back-office client sends `receptionist` /
- * `doctor` / `admin`. When the argument is omitted (or unrecognised) the role
- * falls back to `DEFAULT_ACTOR_ROLE` (`patient`, least privilege).
+ * Production callers bind role through trusted request identity or the
+ * `x-actor-role` header. Development clients may use the `actorRole` tool
+ * argument for compatibility. Missing or unrecognised roles fall back to
+ * `DEFAULT_ACTOR_ROLE` (`patient`, least privilege).
  *
- * ⚠️ Because the role is an argument (not a session header/param), it is only
- * known at `tools/call` time — so `tools/list` is NOT filtered by role; every
- * tool is listed. Enforcement happens on the call: a role that lacks a tool's
- * capability gets a "not authorized" result and the backend is never hit. Use
- * the `GET /tool-access` endpoint to discover which role may use which tool.
+ * `tools/list` is not filtered by role; enforcement happens on each call. A
+ * role that lacks a tool's capability receives a "not authorized" result and
+ * the backend is never hit. `GET /tool-access` exposes the policy matrix.
  *
- * SECURITY: an argument is produced by the AI model, so a model could in
- * principle pass `actorRole: 'admin'`. Keep the trust where it belongs — the
- * TRUSTED client should inject `actorRole` into each call (like it injects
- * `tenantId`), and a patient-facing client should hard-pin `actorRole: 'patient'`
- * so the model can't widen its own access. `actorRole` is authorization scoping
- * for a trusted client, NOT authentication (the real gate is `x-api-key`).
+ * Model-produced role arguments are never trusted in production. The API key
+ * authenticates the client; trusted tenant and role headers scope the call.
  *
  * Roles/capabilities are inspired by the backend permission model but are
  * intentionally coarse — the MCP surface is small.
@@ -33,6 +27,7 @@ export const ACTOR_ROLES = [
   'doctor',
   'receptionist',
   'admin',
+  'lead_agent',
 ] as const;
 export type ActorRole = (typeof ACTOR_ROLES)[number];
 
@@ -44,7 +39,9 @@ export const CAPABILITIES = [
   'appointment:write', // book / reschedule / cancel
   'statistics:read', // tenant-wide analytics
   'lead:read', // CRM: list teams + members (for lead routing)
-  'lead:write', // CRM: create + assign a lead to a team/member
+  'lead:create', // CRM: create a lead record
+  'lead:assign', // CRM: assign an existing lead to a team/member
+  'lead:handoff', // CRM: store a qualified lead phone, assign, and hand off
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -58,7 +55,9 @@ const STAFF: Capability[] = [
   'appointment:write',
   'statistics:read',
   'lead:read',
-  'lead:write',
+  'lead:create',
+  'lead:assign',
+  'lead:handoff',
 ];
 
 /**
@@ -81,6 +80,7 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly Capability[]> = {
   doctor: STAFF,
   receptionist: STAFF,
   admin: CAPABILITIES,
+  lead_agent: ['clinic:read', 'slots:read', 'lead:read', 'lead:handoff'],
 };
 
 const isActorRole = (value: unknown): value is ActorRole =>
@@ -88,7 +88,7 @@ const isActorRole = (value: unknown): value is ActorRole =>
   (ACTOR_ROLES as readonly string[]).includes(value);
 
 /**
- * Role assumed when the `actorRole` argument is omitted or unrecognised.
+ * Role assumed when trusted request identity is omitted or unrecognised.
  * `patient` = least privilege / default-deny: a caller that doesn't identify
  * itself gets only patient-level access, so staff clients MUST pass an explicit
  * `actorRole` (`receptionist` / `doctor` / `admin`). Change this constant to
@@ -97,27 +97,31 @@ const isActorRole = (value: unknown): value is ActorRole =>
 export const DEFAULT_ACTOR_ROLE: ActorRole = 'patient';
 
 /**
- * Shared `actorRole` tool parameter — every guarded tool exposes this so the
- * client can pass the caller's role in the call arguments, exactly like
- * `tenantId`. Optional: omitted → `DEFAULT_ACTOR_ROLE` (`patient`).
+ * Development compatibility parameter. Production identity comes from the
+ * trusted request and ignores this model-produced value.
  */
 export const actorRoleParam = z
   .enum([...ACTOR_ROLES] as [ActorRole, ...ActorRole[]])
   .describe(
-    'Who the AI is acting for: patient | doctor | receptionist | admin. ' +
-      'Controls which tools are allowed. Omit for a patient (least privilege); ' +
-      'a staff/back-office client must pass an explicit role. A patient-facing ' +
-      "client should hard-pin 'patient' so the model can't widen its access.",
+    'Who the AI is acting for: patient | doctor | receptionist | admin | lead_agent. ' +
+      'Development compatibility only; production clients must send the ' +
+      'trusted x-actor-role header. Omit for patient least privilege.',
   )
   .optional();
 
 /**
- * Resolve the caller's role from the `actorRole` tool argument. A recognised
- * value is used as-is; an absent or unrecognised value falls back to
- * `DEFAULT_ACTOR_ROLE`, so the fallback is driven entirely by that one constant.
+ * Resolve trusted request identity first. Development may fall back to the
+ * tool argument; production never does. Unknown roles resolve to patient.
  */
-export const resolveActorRole = (args?: { actorRole?: unknown }): ActorRole => {
-  const raw = args?.actorRole;
+export const resolveActorRole = (
+  request?: ToolRequest,
+  args?: { actorRole?: unknown },
+): ActorRole => {
+  const headerValue = request?.headers?.['x-actor-role'];
+  const raw =
+    request?.user?.role ??
+    (Array.isArray(headerValue) ? headerValue[0] : headerValue) ??
+    (process.env.NODE_ENV === 'production' ? undefined : args?.actorRole);
   const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   return isActorRole(normalized) ? normalized : DEFAULT_ACTOR_ROLE;
 };
@@ -132,14 +136,15 @@ export const rolesWithCapability = (capability: Capability): ActorRole[] =>
 
 /**
  * Authorization check for a tool handler. Returns an error `McpToolResult` when
- * the caller's role (from the `actorRole` argument) lacks the capability, or
+ * the caller's resolved role lacks the capability, or
  * `null` to proceed.
  */
 export const authorize = (
+  request: ToolRequest | undefined,
   args: { actorRole?: unknown } | undefined,
   capability: Capability,
 ): McpToolResult | null => {
-  const role = resolveActorRole(args);
+  const role = resolveActorRole(request, args);
   if (roleCan(role, capability)) return null;
   return errorResult(
     `Not authorized: the '${role}' role cannot perform '${capability}'. ` +

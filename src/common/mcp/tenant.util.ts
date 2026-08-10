@@ -13,6 +13,7 @@ export type ToolRequest = {
   user?: {
     tenantId?: string;
     tenant?: { id?: string };
+    role?: string;
   };
 };
 
@@ -20,10 +21,8 @@ export type ToolRequest = {
 const OBJECT_ID = /^[a-f\d]{24}$/i;
 
 /**
- * Shared `tenantId` tool parameter. Every tool exposes this so an AI model can
- * pass the tenant explicitly in the call arguments and get a clear validation
- * error on a malformed value. Optional at the schema level so clients that
- * still supply the tenant via the `x-tenant-id` header keep working.
+ * Development compatibility parameter. Production requires trusted request
+ * identity or the `x-tenant-id` header and ignores this model-produced value.
  */
 export const tenantIdParam = z
   .string()
@@ -31,25 +30,21 @@ export const tenantIdParam = z
   .regex(OBJECT_ID, 'tenantId must be a 24-character hex id (MongoDB ObjectId)')
   .describe(
     'The tenant (clinic) to act on, as a 24-character hex id. Pass this on ' +
-      'every call. May be omitted only when the client supplies the tenant ' +
-      'via the x-tenant-id header.',
+      'development call. Production clients must supply x-tenant-id.',
   )
   .optional();
 
 /**
  * Resolve the active tenant for a tool call. Precedence:
- *   1. Explicit `tenantId` tool argument (what AI models pass).
- *   2. An authenticated `request.user` (future auth).
- *   3. The `x-tenant-id` header (legacy transport, kept for back-compat).
+ *   1. An authenticated `request.user`.
+ *   2. The trusted `x-tenant-id` transport header.
+ *   3. Explicit `tenantId` tool argument (legacy clients only).
  * Returns a trimmed, non-empty id or null when no tenant context is present.
  */
 export const resolveTenantId = (
   request?: ToolRequest,
   args?: { tenantId?: string },
 ): string | null => {
-  const fromArgs = args?.tenantId?.trim();
-  if (fromArgs) return fromArgs;
-
   const fromUser = (
     request?.user?.tenantId ??
     request?.user?.tenant?.id ??
@@ -62,6 +57,10 @@ export const resolveTenantId = (
     return headerValue.trim();
   if (Array.isArray(headerValue) && headerValue[0]?.trim())
     return headerValue[0].trim();
+
+  if (process.env.NODE_ENV === 'production') return null;
+  const fromArgs = args?.tenantId?.trim();
+  if (fromArgs) return fromArgs;
 
   return null;
 };

@@ -5,29 +5,21 @@ Every MCP tool call is scoped by two things your **client** supplies (not the AI
 | Where | Name | Purpose | Example |
 | --- | --- | --- | --- |
 | Header | `x-tenant-id` | Which clinic to act on (24-char hex id) | `x-tenant-id: 6935b6ea…` |
-| `tools/call` argument | `actorRole` | Who the AI is acting for (per call) | `"actorRole": "patient"` |
+| Header | `x-actor-role` | Trusted role for the connection/call | `x-actor-role: lead_agent` |
 
-> `x-api-key` still authenticates the client itself (unchanged), and `x-tenant-id` still scopes the tenant (unchanged). `tenantId` is still a per-call tool argument (unchanged).
+> In production, `x-api-key` authenticates the client and the trusted `x-tenant-id` / `x-actor-role` headers scope it. Model-produced identity arguments are accepted only for development compatibility.
 
-## ⚠️ `actorRole` is a per-call tool argument (read this first)
+## Trusted identity
 
-The role travels in the **`arguments` of each `tools/call`** — exactly like `tenantId` — not in `initialize` params and not in a header. Allowed values: `patient` | `doctor` | `receptionist` | `admin`.
+Production clients must send `x-tenant-id` and `x-actor-role` with the authenticated `x-api-key`. Allowed roles are `patient`, `doctor`, `receptionist`, `admin`, and `lead_agent`. The trusted client, not the model, chooses these headers.
 
-- ✅ Include `actorRole` in the `arguments` of **every** `tools/call`.
-- Omitted or unrecognised → `patient` (the least-privilege `DEFAULT_ACTOR_ROLE`), so a **staff-facing client MUST inject an explicit staff role** (`receptionist` / `doctor` / `admin`) into each call to unlock staff tools.
-
-```jsonc
-{ "method": "tools/call",
-  "params": { "name": "statistics.get_appointment_summary",
-              "arguments": { "tenantId": "6935b6ea…", "actorRole": "receptionist",
-                             "from": "2026-07-01", "to": "2026-07-07" } } }
+```http
+x-api-key: <MCP_CLIENT_API_KEY>
+x-tenant-id: 6935b6ea...
+x-actor-role: lead_agent
 ```
 
-Enforcement is **per-call**: a `@RequireCapability(...)` wrapper around each tool handler reads the call's `actorRole` and checks it against the tool's capability. The role is only known at call time — there is no session-wide role — so the same client can make calls as different roles on different tools (a trusted client normally pins one role per session; see below).
-
-## Set a fixed role in a patient-facing client
-
-Because `actorRole` is a tool argument produced by the model, the **trusted client should inject it into each call** (the same way it injects `tenantId`) rather than letting the model choose. A patient-facing client should **hard-pin `actorRole: 'patient'`** on every call so the model cannot self-elevate (e.g. slip in `actorRole: "admin"`). `actorRole` is authorization *scoping* for a trusted client, **not** authentication — the real gate is `x-api-key`.
+Development clients may still use `tenantId` and `actorRole` tool arguments for compatibility. Production ignores those arguments for identity selection; missing role falls back to `patient`, and missing trusted tenant context rejects the tool call.
 
 ## Roles → what they can do
 
@@ -40,7 +32,8 @@ Because `actorRole` is a tool argument produced by the model, the **trusted clie
 | List / fetch any appointment in the clinic | `appointment.list_appointments` / `get_appointment` | ❌ | ✅ |
 | Tenant analytics | `statistics.*` | ❌ | ✅ |
 | CRM: list teams + members | `crm.list_teams` / `crm.get_team` (`lead:read`) | ❌ | ✅ |
-| CRM: create / assign a lead | `crm.create_lead` / `crm.assign_lead` (`lead:write`) | ❌ | ✅ |
+| CRM: create a lead | `crm.create_lead` (`lead:create`) | ❌ | ✅ (not `lead_agent`) |
+| CRM: assign a lead | `crm.assign_lead` (`lead:assign`) | ❌ | ✅ |
 
 The role is only known at call time, so enforcement is **per-call** against each tool's capability:
 
@@ -71,16 +64,17 @@ Because `tools/list` is not role-filtered, a plain HTTP endpoint (**not** an MCP
 
 Implementation lives in `src/tool-access/` (`ToolAccessController` + `ToolAccessService`).
 
-## How to use it (per call)
+## How to use it
 
-Inject `actorRole` into each `tools/call`'s `arguments` based on who is talking to the AI:
+Pin `x-actor-role` on the trusted MCP connection based on the workload:
 
-- **Patient chatbot** → hard-pin `"actorRole": "patient"` on every call (or omit it)
-- **Front-desk / staff assistant** → `"actorRole": "receptionist"` (or `doctor` / `admin`)
+- **Patient chatbot** -> `x-actor-role: patient`
+- **Front-desk / staff assistant** -> `x-actor-role: receptionist` (or `doctor` / `admin`)
+- **Meta lead agent** -> `x-actor-role: lead_agent`
 
-Behavior when `actorRole` is missing or wrong (fail-**closed** to `patient`):
+Behavior when the trusted role is missing or wrong (fail-**closed** to `patient`):
 
-- **Omitted** → `patient` (the `DEFAULT_ACTOR_ROLE` constant in `src/common/mcp/authorization.util.ts`). Least privilege, so a **staff-facing client MUST inject an explicit staff role into each call** to reach staff tools.
+- **Omitted** → `patient` (the `DEFAULT_ACTOR_ROLE` constant in `src/common/mcp/authorization.util.ts`). A staff-facing client must send an explicit trusted role header to reach staff tools.
 - **Unrecognised value** → also `patient`.
 
 > ⚠️ This is fail-**closed**: an unidentified caller gets only the patient tool surface. Change the fallback by editing `DEFAULT_ACTOR_ROLE`.
