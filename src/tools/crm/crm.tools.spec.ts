@@ -21,7 +21,7 @@ describe('CrmTools', () => {
     tools = new CrmTools(backend as never);
   });
 
-  it('registers the full Meta lead toolset and keeps the CRM team tools', () => {
+  it('keeps lead reads under CRM and only handoff under Meta leads', () => {
     const prototype = CrmTools.prototype as unknown as Record<
       string,
       (...args: unknown[]) => unknown
@@ -36,83 +36,17 @@ describe('CrmTools', () => {
     };
 
     expect(toolName('getConversationContext')).toBe(
-      'meta_leads.get_conversation_context',
+      'crm.get_conversation_context',
     );
-    expect(toolName('listMetaLeadTeams')).toBe('meta_leads.list_teams');
-    expect(toolName('getMetaLeadTeam')).toBe('meta_leads.get_team');
     expect(toolName('qualifyAndHandoff')).toBe(
       'meta_leads.qualify_and_handoff',
     );
 
     expect(toolName('listTeams')).toBe('crm.list_teams');
     expect(toolName('getTeam')).toBe('crm.get_team');
-  });
-
-  describe('create_lead', () => {
-    const leadPayload = {
-      id: 'lead9',
-      firstName: 'Mohammed',
-      lastName: 'Emam',
-      phone: '01204045635',
-      email: null,
-      assignedTo: null,
-      status: 'open',
-      assignedAt: null,
-    };
-
-    it('creates an unassigned lead and returns schema-valid output', async () => {
-      backend.post.mockResolvedValue(leadPayload);
-
-      const result = await tools.createLead(
-        {
-          tenantId: TENANT,
-          actorRole: 'admin',
-          firstName: 'Mohammed',
-          lastName: 'Emam',
-          phone: '01204045635',
-          address: 'Shubra Hares, Toukh, Qalyubia',
-        },
-        undefined,
-        req,
-      );
-
-      expect(result.isError).toBeFalsy();
-      expect(() =>
-        LeadAssignmentOutputSchema.parse(result.structuredContent),
-      ).not.toThrow();
-      expect(backend.post).toHaveBeenCalledWith(
-        '/api/v1/mcp/crm/leads',
-        {
-          firstName: 'Mohammed',
-          lastName: 'Emam',
-          phone: '01204045635',
-          email: undefined,
-          address: 'Shubra Hares, Toukh, Qalyubia',
-          priority: undefined,
-        },
-        { headers: { 'x-tenant-id': TENANT } },
-      );
-    });
-
-    it('maps a 409 duplicate to a friendly isError', async () => {
-      backend.post.mockRejectedValue(
-        new BackendException(409, 'Lead with this phone number already exists'),
-      );
-      const result = await tools.createLead(
-        {
-          tenantId: TENANT,
-          actorRole: 'admin',
-          firstName: 'Mohammed',
-          lastName: 'Emam',
-          phone: '01204045635',
-        },
-        undefined,
-        req,
-      );
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toMatch(/already exists/i);
-      expect(result.structuredContent).toBeUndefined();
-    });
+    expect(toolName('createLead')).toBeUndefined();
+    expect(toolName('listMetaLeadTeams')).toBeUndefined();
+    expect(toolName('getMetaLeadTeam')).toBeUndefined();
   });
 
   describe('get_conversation_context', () => {
@@ -355,7 +289,7 @@ describe('CrmTools', () => {
       );
     });
 
-    it('does not let a lead agent use the generic assignment tool', async () => {
+    it('lets a lead agent assign while stripping actor attribution', async () => {
       backend.post.mockResolvedValue(leadPayload);
 
       const result = await tools.assignLead(
@@ -372,9 +306,17 @@ describe('CrmTools', () => {
         },
       );
 
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toMatch(/not authorized/i);
-      expect(backend.post).not.toHaveBeenCalled();
+      expect(result.isError).toBeFalsy();
+      expect(backend.post).toHaveBeenCalledWith(
+        '/api/v1/mcp/crm/leads/lead1/assign',
+        {
+          assignedTo: undefined,
+          teamId: 't1',
+          isRoundRobin: undefined,
+          actorUserId: undefined,
+        },
+        { headers: { 'x-tenant-id': TENANT } },
+      );
     });
 
     it('rejects when neither assignedTo nor teamId is given (no backend call)', async () => {
@@ -426,7 +368,7 @@ describe('CrmTools', () => {
   });
 
   describe('qualify_and_handoff', () => {
-    it('stores the phone and routes the current conversation through one backend call', async () => {
+    it('stores the phone and hands off an already-assigned lead', async () => {
       const payload = {
         id: 'lead1',
         firstName: 'Jane',
@@ -449,8 +391,6 @@ describe('CrmTools', () => {
           conversationId: 'conversation1',
           inboundMessageId: 'message1',
           phone: '+201012345678',
-          assignedTo: 'u2',
-          teamId: 'team1',
         },
         undefined,
         {
@@ -470,33 +410,9 @@ describe('CrmTools', () => {
         {
           inboundMessageId: 'message1',
           phone: '+201012345678',
-          assignedTo: 'u2',
-          teamId: 'team1',
         },
         { headers: { 'x-tenant-id': TENANT } },
       );
-    });
-
-    it('rejects a handoff without an assignment target', async () => {
-      const result = await tools.qualifyAndHandoff(
-        {
-          conversationId: 'conversation1',
-          inboundMessageId: 'message1',
-          phone: '+201012345678',
-          assignedTo: undefined as never,
-          teamId: 'team1',
-        },
-        undefined,
-        {
-          headers: {
-            'x-tenant-id': TENANT,
-            'x-actor-role': 'lead_agent',
-          },
-        },
-      );
-
-      expect(result.isError).toBe(true);
-      expect(backend.post).not.toHaveBeenCalled();
     });
 
     it('uses trusted run headers instead of model-provided turn ids in production', async () => {
@@ -522,8 +438,6 @@ describe('CrmTools', () => {
             conversationId: 'spoofed-conversation',
             inboundMessageId: 'spoofed-message',
             phone: '+201012345678',
-            assignedTo: 'u2',
-            teamId: 'team1',
           },
           undefined,
           {

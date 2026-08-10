@@ -65,17 +65,17 @@ const WRITE_ANNOTATIONS = {
 
 /**
  * CRM lead tools. Meta lead agents use the existing conversation lead, inspect
- * teams, then call meta_leads.qualify_and_handoff after collecting a phone. Staff can
- * also create and assign leads directly through the generic tools.
+ * teams, assign it with crm.assign_lead, then call
+ * meta_leads.qualify_and_handoff after collecting a phone.
  */
 @Injectable()
 export class CrmTools {
   constructor(private readonly backend: BackendHttpService) {}
 
   @Tool({
-    name: 'meta_leads.get_conversation_context',
+    name: 'crm.get_conversation_context',
     description:
-      'Loads the existing Meta lead, current owner, conversation state, channel type, and recent messages in chronological order. Use this before routing a lead. The lead already exists: never call crm.create_lead for this conversation. After collecting a phone and choosing a route, use meta_leads.qualify_and_handoff.',
+      'Loads the existing Meta lead, current owner, conversation state, channel type, and recent messages in chronological order. Use this before routing a lead. The lead already exists. After collecting a phone and choosing a route, use meta_leads.qualify_and_handoff.',
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -127,118 +127,6 @@ export class CrmTools {
         `Failed to load conversation context: ${(e as Error).message}`,
       );
     }
-  }
-
-  @Tool({
-    name: 'crm.create_lead',
-    description:
-      "Creates a NEW lead (customer record) from details gathered in a conversation — use this the moment a customer shares who they are (name + phone). It creates the lead UNASSIGNED (no owner yet); you then route it with crm.list_teams → crm.assign_lead. Required: firstName, lastName, phone. Optional: email, address (their location/area), priority. Leads are de-duplicated by phone (and email) within the tenant — if an active lead with that phone/email already exists the call fails (409 'already exists'), so you don't create duplicates. Returns the created lead (its `id` is what you pass as `leadId` to crm.assign_lead; `assignedTo` will be null until you assign it).",
-    parameters: z.object({
-      tenantId: tenantIdParam,
-      actorRole: actorRoleParam,
-      firstName: z.string().min(1).describe("The customer's first name."),
-      lastName: z.string().min(1).describe("The customer's last name."),
-      phone: z
-        .string()
-        .min(1)
-        .describe(
-          'Phone number — digits, optional leading + (e.g. 01204045635 or +201204045635).',
-        ),
-      email: z.string().email().optional().describe('Optional email address.'),
-      address: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          "Optional location/address the customer mentioned (e.g. 'Shubra Hares, Toukh, Qalyubia').",
-        ),
-      priority: z
-        .enum(['low', 'high'])
-        .optional()
-        .describe('Optional lead priority. Defaults to low.'),
-      format: formatSchema.optional(),
-    }),
-    outputSchema: LeadAssignmentOutputSchema,
-    annotations: WRITE_ANNOTATIONS,
-  })
-  @RequireCapability('lead:create')
-  async createLead(
-    args: {
-      tenantId?: string;
-      actorRole?: ActorRole;
-      firstName: string;
-      lastName: string;
-      phone: string;
-      email?: string;
-      address?: string;
-      priority?: 'low' | 'high';
-      format?: OutputFormat;
-    },
-    _context: unknown,
-    request?: ToolRequest,
-  ): Promise<McpToolResult> {
-    const format = args.format ?? 'json';
-    const tenantId = resolveTenantId(request, args);
-    if (!tenantId) return missingTenant();
-
-    try {
-      const data = await this.postWithTenantHeader<LeadAssignmentOutput>(
-        tenantId,
-        '/api/v1/mcp/crm/leads',
-        {
-          firstName: args.firstName,
-          lastName: args.lastName,
-          phone: args.phone,
-          email: args.email,
-          address: args.address,
-          priority: args.priority,
-        },
-      );
-      return this.formatResult(data, format, (p) => this.renderCreatedLead(p));
-    } catch (e) {
-      if (e instanceof BackendException && e.status === 409) {
-        return errorResult(
-          `A lead with this phone or email already exists. ${(e as Error).message}`,
-        );
-      }
-      return errorResult(`Failed to create lead: ${(e as Error).message}`);
-    }
-  }
-
-  @Tool({
-    name: 'meta_leads.list_teams',
-    description:
-      "Lists the workspace's teams so a Meta lead can be routed to the right one. Returns each team's id, name, description, member count, team lead name, status, and reserved status. Read the descriptions, skip the system-reserved Unassigned team, choose the best fit, then call meta_leads.get_team.",
-    parameters: z.object({
-      tenantId: tenantIdParam,
-      actorRole: actorRoleParam,
-      status: z
-        .enum(['active', 'archived'])
-        .optional()
-        .describe('Filter by team status. Defaults to active.'),
-      search: z.string().min(1).optional().describe('Filter teams by name.'),
-      page: z.number().int().positive().optional(),
-      limit: z.number().int().positive().max(100).optional(),
-      format: formatSchema.optional(),
-    }),
-    outputSchema: TeamsListOutputSchema,
-    annotations: READ_ANNOTATIONS,
-  })
-  @RequireCapability('lead:read')
-  async listMetaLeadTeams(
-    args: {
-      tenantId?: string;
-      actorRole?: ActorRole;
-      status?: 'active' | 'archived';
-      search?: string;
-      page?: number;
-      limit?: number;
-      format?: OutputFormat;
-    },
-    context: unknown,
-    request?: ToolRequest,
-  ): Promise<McpToolResult> {
-    return this.listTeams(args, context, request);
   }
 
   @Tool({
@@ -298,36 +186,9 @@ export class CrmTools {
   }
 
   @Tool({
-    name: 'meta_leads.get_team',
-    description:
-      "Returns a routing team's team lead and members, including each person's id, name, and role. Use the result to choose a concrete sales representative, then pass that person's id and the matching team id to meta_leads.qualify_and_handoff.",
-    parameters: z.object({
-      tenantId: tenantIdParam,
-      actorRole: actorRoleParam,
-      teamId: z.string().min(1),
-      format: formatSchema.optional(),
-    }),
-    outputSchema: TeamDetailOutputSchema,
-    annotations: READ_ANNOTATIONS,
-  })
-  @RequireCapability('lead:read')
-  async getMetaLeadTeam(
-    args: {
-      tenantId?: string;
-      actorRole?: ActorRole;
-      teamId: string;
-      format?: OutputFormat;
-    },
-    context: unknown,
-    request?: ToolRequest,
-  ): Promise<McpToolResult> {
-    return this.getTeam(args, context, request);
-  }
-
-  @Tool({
     name: 'crm.get_team',
     description:
-      "Returns one team's teamLead and members (each with id, name, roleName) plus its description and memberCount. After picking a team with crm.list_teams, call this to choose who should own the lead. Meta lead agents pass the route to meta_leads.qualify_and_handoff; staff may use crm.assign_lead. `teamLead` may be null (team with no designated lead).",
+      "Returns one team's teamLead and members (each with id, name, roleName) plus its description and memberCount. After picking a team with crm.list_teams, call this to choose who should own the lead, then call crm.assign_lead. `teamLead` may be null (team with no designated lead).",
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -371,7 +232,7 @@ export class CrmTools {
   @Tool({
     name: 'meta_leads.qualify_and_handoff',
     description:
-      'Completes the Meta lead qualification and starts human takeover in one operation. Call this only after the customer provides a phone number in the current message and the conversation supports a routing choice. It updates the existing lead, assigns it, and marks this exact inbound turn for handoff. The TechTrax backend sends deterministic transition copy after success. Never call crm.create_lead or crm.assign_lead for this Meta flow.',
+      "Updates the user's phone number after the main agent collects the user's information. Use this tool to store the phone number and start human takeover for an already-assigned lead. It does not select a team or change assignment.",
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -384,14 +245,6 @@ export class CrmTools {
         .string()
         .regex(/^\+?\d{7,16}$/)
         .describe('The phone number explicitly provided by the lead.'),
-      assignedTo: z
-        .string()
-        .min(1)
-        .describe('The selected team lead or sales team member id.'),
-      teamId: z
-        .string()
-        .min(1)
-        .describe('The team whose lead/member was selected.'),
       format: formatSchema.optional(),
     }),
     outputSchema: LeadHandoffOutputSchema,
@@ -405,8 +258,6 @@ export class CrmTools {
       conversationId: string;
       inboundMessageId: string;
       phone: string;
-      assignedTo: string;
-      teamId: string;
       format?: OutputFormat;
     },
     _context: unknown,
@@ -429,10 +280,6 @@ export class CrmTools {
         'Trusted x-conversation-id and x-inbound-message-id headers are required.',
       );
     }
-    if (!args.assignedTo || !args.teamId) {
-      return errorResult('Provide assignedTo and teamId before handing off.');
-    }
-
     try {
       const data = await this.postWithTenantHeader<LeadHandoffOutput>(
         tenantId,
@@ -440,8 +287,6 @@ export class CrmTools {
         {
           inboundMessageId,
           phone: args.phone,
-          assignedTo: args.assignedTo,
-          teamId: args.teamId,
         },
       );
       const parsed = LeadHandoffOutputSchema.parse(data);
@@ -459,7 +304,7 @@ export class CrmTools {
   @Tool({
     name: 'crm.assign_lead',
     description:
-      "Staff-only generic assignment for an EXISTING lead. Meta lead agents must use meta_leads.qualify_and_handoff instead. It does NOT create a lead; it re-owns `leadId` and notifies the new owner. There are THREE ways to choose the owner (decide from the lead's conversation + the teams' names/descriptions):\n" +
+      "Assigns an EXISTING lead and notifies the new owner. Meta lead agents must call this before meta_leads.qualify_and_handoff. It does NOT create a lead. There are THREE ways to choose the owner (decide from the lead's conversation + the teams' names/descriptions):\n" +
       '1. Specific person — pass `assignedTo` (a teamLead._id or members[]._id from crm.get_team). Use when the conversation points to one person. `teamId` is optional here (but if given, the user must belong to it).\n' +
       "2. Team lead — pass `teamId` only (no `assignedTo`, no `isRoundRobin`). The lead goes to that team's designated team lead.\n" +
       "3. Auto / round-robin — pass `teamId` + `isRoundRobin: true`. The backend fairly distributes across the team's MEMBERS (team lead excluded), load-aware: it picks whoever currently has the fewest open leads. Use when you just want the right TEAM to handle it and don't need a specific person.\n" +
@@ -641,21 +486,6 @@ export class CrmTools {
       `- **Handoff:** ${data.handoffStatus}`,
       '',
       'Tell the customer to send their next message for the assigned sales representative.',
-    ].join('\n');
-  }
-
-  private renderCreatedLead(data: LeadAssignmentOutput): string {
-    const name =
-      `${data.firstName ?? ''} ${data.lastName ?? ''}`.trim() || data.id;
-    return [
-      '# Lead created',
-      '',
-      `- **Lead:** ${name} (${data.id})`,
-      `- **Phone:** ${data.phone ?? 'N/A'}`,
-      `- **Status:** ${data.status ?? 'N/A'}`,
-      `- **Assigned to:** ${data.assignedTo ?? 'unassigned — route it with crm.assign_lead'}`,
-      '',
-      `Next: pick a team with crm.list_teams, then call crm.assign_lead with leadId=${data.id}.`,
     ].join('\n');
   }
 }

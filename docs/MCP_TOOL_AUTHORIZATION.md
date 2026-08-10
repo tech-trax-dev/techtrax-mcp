@@ -11,7 +11,7 @@ Every MCP tool call is scoped by two things your **client** supplies (not the AI
 
 ## Trusted identity
 
-Production clients must send `x-tenant-id` and `x-actor-role` with the authenticated `x-api-key`. Allowed roles are `patient`, `doctor`, `receptionist`, `admin`, and `lead_agent`. The trusted client, not the model, chooses these headers.
+Production clients must send `x-tenant-id` with the authenticated `x-api-key`. Role resolution prefers trusted request identity, then `x-actor-role`, then the `actorRole` tool argument. Allowed roles are `patient`, `doctor`, `receptionist`, `admin`, and `lead_agent`.
 
 ```http
 x-api-key: <MCP_CLIENT_API_KEY>
@@ -32,10 +32,9 @@ Development clients may still use `tenantId` and `actorRole` tool arguments for 
 | List / fetch any appointment in the clinic | `appointment.list_appointments` / `get_appointment` | ❌ | ✅ |
 | Tenant analytics | `statistics.*` | ❌ | ✅ |
 | CRM: list teams + members | `crm.list_teams` / `crm.get_team` (`lead:read`) | ❌ | ✅ |
-| CRM: create a lead | `crm.create_lead` (`lead:create`) | ❌ | ✅ (not `lead_agent`) |
 | CRM: assign a lead | `crm.assign_lead` (`lead:assign`) | ❌ | ✅ |
 
-The Meta lead agent uses the four-tool `meta_leads.*` workflow. `meta_leads.list_teams` and `meta_leads.get_team` share the same `lead:read` policy and backend behavior as their original `crm.*` counterparts.
+The Meta lead agent reads through `crm.get_conversation_context`, `crm.list_teams`, and `crm.get_team`, assigns through `crm.assign_lead`, then starts takeover through `meta_leads.qualify_and_handoff`.
 
 The role is only known at call time, so enforcement is **per-call** against each tool's capability:
 
@@ -51,20 +50,20 @@ Because `tools/list` is not role-filtered, a plain HTTP endpoint (**not** an MCP
 - **`GET /tool-access`** → the full matrix, including role and namespace views:
   ```jsonc
   { "roles": ["patient", "doctor", "receptionist", "admin", "lead_agent"],
-    "capabilitiesByRole": { "lead_agent": ["clinic:read", "slots:read", "lead:read", "lead:handoff"], "…": [] },
-    "tools": [ { "name": "meta_leads.get_conversation_context", "capability": "lead:read",
+    "capabilitiesByRole": { "lead_agent": ["clinic:read", "slots:read", "lead:read", "lead:assign", "lead:handoff"], "…": [] },
+    "tools": [ { "name": "crm.get_conversation_context", "capability": "lead:read",
                  "allowedRoles": ["doctor", "receptionist", "admin", "lead_agent"] } ],
-    "toolsByRole": { "patient": ["…"], "lead_agent": ["meta_leads.get_conversation_context", "…"] },
+    "toolsByRole": { "patient": ["…"], "lead_agent": ["crm.get_conversation_context", "…"] },
     "namespaces": ["appointment", "crm", "meta_leads", "statistics", "tenant_info"],
-    "toolsByNamespace": { "meta_leads": ["meta_leads.get_conversation_context", "meta_leads.get_team", "meta_leads.list_teams", "meta_leads.qualify_and_handoff"] } }
+    "toolsByNamespace": { "meta_leads": ["meta_leads.qualify_and_handoff"] } }
   ```
 - **`GET /tool-access?role=lead_agent`** → only tools that the Meta lead role may call, also grouped by namespace:
   ```jsonc
   { "role": "lead_agent",
-    "capabilities": ["clinic:read", "slots:read", "lead:read", "lead:handoff"],
-    "tools": [ { "name": "meta_leads.get_conversation_context", "capability": "lead:read" } ],
+    "capabilities": ["clinic:read", "slots:read", "lead:read", "lead:assign", "lead:handoff"],
+    "tools": [ { "name": "crm.get_conversation_context", "capability": "lead:read" } ],
     "namespaces": ["appointment", "crm", "meta_leads", "tenant_info"],
-    "toolsByNamespace": { "meta_leads": ["meta_leads.get_conversation_context", "meta_leads.get_team", "meta_leads.list_teams", "meta_leads.qualify_and_handoff"] } }
+    "toolsByNamespace": { "meta_leads": ["meta_leads.qualify_and_handoff"] } }
   ```
   An unknown `role` returns HTTP `400`.
 

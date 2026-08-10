@@ -48,12 +48,12 @@ describe('authorization.util', () => {
       ).toBe('lead_agent');
     });
 
-    it('does not trust a model-supplied elevated role in production', () => {
+    it('uses the actorRole argument as a fallback in production', () => {
       const previous = process.env.NODE_ENV;
       process.env.NODE_ENV = 'production';
       try {
-        expect(resolveActorRole(undefined, { actorRole: 'admin' })).toBe(
-          'patient',
+        expect(resolveActorRole(undefined, { actorRole: 'lead_agent' })).toBe(
+          'lead_agent',
         );
       } finally {
         process.env.NODE_ENV = previous;
@@ -80,7 +80,6 @@ describe('authorization.util', () => {
         expect(roleCan(role, 'statistics:read')).toBe(true);
         expect(roleCan(role, 'patient:read')).toBe(true);
         expect(roleCan(role, 'lead:read')).toBe(true);
-        expect(roleCan(role, 'lead:create')).toBe(true);
         expect(roleCan(role, 'lead:assign')).toBe(true);
         expect(roleCan(role, 'lead:handoff')).toBe(true);
       }
@@ -88,21 +87,20 @@ describe('authorization.util', () => {
 
     it('patients cannot touch CRM leads', () => {
       expect(roleCan('patient', 'lead:read')).toBe(false);
-      expect(roleCan('patient', 'lead:create')).toBe(false);
       expect(roleCan('patient', 'lead:assign')).toBe(false);
       expect(roleCan('patient', 'lead:handoff')).toBe(false);
     });
 
-    it('lead agents can complete qualified handoffs without arbitrary assignment access', () => {
+    it('lead agents can assign qualified leads and complete handoffs', () => {
       expect(ROLE_CAPABILITIES.lead_agent).toEqual([
         'clinic:read',
         'slots:read',
         'lead:read',
+        'lead:assign',
         'lead:handoff',
       ]);
       expect(roleCan('lead_agent', 'lead:handoff')).toBe(true);
-      expect(roleCan('lead_agent', 'lead:assign')).toBe(false);
-      expect(roleCan('lead_agent', 'lead:create')).toBe(false);
+      expect(roleCan('lead_agent', 'lead:assign')).toBe(true);
       expect(roleCan('lead_agent', 'patient:read')).toBe(false);
       expect(roleCan('lead_agent', 'appointment:read')).toBe(false);
       expect(roleCan('lead_agent', 'appointment:write')).toBe(false);
@@ -128,17 +126,13 @@ describe('authorization.util', () => {
         'doctor',
         'receptionist',
         'admin',
+        'lead_agent',
       ]);
       expect(rolesWithCapability('lead:handoff')).toEqual([
         'doctor',
         'receptionist',
         'admin',
         'lead_agent',
-      ]);
-      expect(rolesWithCapability('lead:create')).toEqual([
-        'doctor',
-        'receptionist',
-        'admin',
       ]);
     });
   });
@@ -196,6 +190,18 @@ describe('RequireCapability decorator (per-call enforcement)', () => {
     const host = new Host();
     expect(host.run({ actorRole: 'receptionist' })).toEqual({ ok: true });
     expect(host.calls).toBe(1);
+  });
+
+  it('accepts the actorRole argument in production when no trusted role is present', () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const host = new Host();
+      expect(host.run({ actorRole: 'receptionist' })).toEqual({ ok: true });
+      expect(host.calls).toBe(1);
+    } finally {
+      process.env.NODE_ENV = previous;
+    }
   });
 
   it('blocks the handler (isError, no invocation) for an unauthorized role', () => {
