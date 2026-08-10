@@ -34,7 +34,7 @@ Development clients may still use `tenantId` and `actorRole` tool arguments for 
 | CRM: list teams + members | `crm.list_teams` / `crm.get_team` (`lead:read`) | ❌ | ✅ |
 | CRM: assign a lead | `crm.assign_lead` (`lead:assign`) | ❌ | ✅ |
 
-The Meta lead agent reads through `crm.get_conversation_context`, `crm.list_teams`, and `crm.get_team`, then writes through `meta_leads.qualify_and_handoff`.
+The Meta lead agent reads through `crm.get_conversation_context`, `crm.list_teams`, and `crm.get_team`, assigns through `crm.assign_lead`, then starts takeover through `meta_leads.qualify_and_handoff`.
 
 The role is only known at call time, so enforcement is **per-call** against each tool's capability:
 
@@ -50,7 +50,7 @@ Because `tools/list` is not role-filtered, a plain HTTP endpoint (**not** an MCP
 - **`GET /tool-access`** → the full matrix, including role and namespace views:
   ```jsonc
   { "roles": ["patient", "doctor", "receptionist", "admin", "lead_agent"],
-    "capabilitiesByRole": { "lead_agent": ["clinic:read", "slots:read", "lead:read", "lead:handoff"], "…": [] },
+    "capabilitiesByRole": { "lead_agent": ["clinic:read", "slots:read", "lead:read", "lead:assign", "lead:handoff"], "…": [] },
     "tools": [ { "name": "crm.get_conversation_context", "capability": "lead:read",
                  "allowedRoles": ["doctor", "receptionist", "admin", "lead_agent"] } ],
     "toolsByRole": { "patient": ["…"], "lead_agent": ["crm.get_conversation_context", "…"] },
@@ -60,7 +60,7 @@ Because `tools/list` is not role-filtered, a plain HTTP endpoint (**not** an MCP
 - **`GET /tool-access?role=lead_agent`** → only tools that the Meta lead role may call, also grouped by namespace:
   ```jsonc
   { "role": "lead_agent",
-    "capabilities": ["clinic:read", "slots:read", "lead:read", "lead:handoff"],
+    "capabilities": ["clinic:read", "slots:read", "lead:read", "lead:assign", "lead:handoff"],
     "tools": [ { "name": "crm.get_conversation_context", "capability": "lead:read" } ],
     "namespaces": ["appointment", "crm", "meta_leads", "tenant_info"],
     "toolsByNamespace": { "meta_leads": ["meta_leads.qualify_and_handoff"] } }

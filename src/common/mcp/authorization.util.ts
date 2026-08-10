@@ -78,7 +78,13 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly Capability[]> = {
   doctor: STAFF,
   receptionist: STAFF,
   admin: CAPABILITIES,
-  lead_agent: ['clinic:read', 'slots:read', 'lead:read', 'lead:handoff'],
+  lead_agent: [
+    'clinic:read',
+    'slots:read',
+    'lead:read',
+    'lead:assign',
+    'lead:handoff',
+  ],
 };
 
 const isActorRole = (value: unknown): value is ActorRole =>

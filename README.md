@@ -93,7 +93,7 @@ Policy lives in [`src/common/mcp/authorization.util.ts`](src/common/mcp/authoriz
 | `lead:read` | `crm.list_teams` / `crm.get_team` | ❌ | ✅ |
 | `lead:assign` | `crm.assign_lead` | ❌ | ✅ |
 
-Meta lead reads use `crm.get_conversation_context`, `crm.list_teams`, and `crm.get_team`. The restricted write operation remains `meta_leads.qualify_and_handoff`.
+The Meta lead workflow reads through `crm.get_conversation_context`, selects routing with `crm.list_teams` and `crm.get_team`, assigns with `crm.assign_lead`, then stores the phone and starts takeover with `meta_leads.qualify_and_handoff`.
 
 Enforcement is **per-call**: a `@RequireCapability(...)` wrapper (in [`tool-authorization.guard.ts`](src/common/mcp/tool-authorization.guard.ts)) wraps each tool handler and checks the call's `actorRole` against the tool's capability. `tools/list` is **NOT** filtered — every tool is always listed — but calling one your role lacks returns an error result (`Not authorized: the '<role>' role cannot perform '<capability>'…`) with the backend never hit. Patients get the self-service set — browse the clinic/doctors/specialties, check slots, and manage their own appointments (book/reschedule/cancel). They cannot search the patient directory, list every appointment in the tenant, or view analytics. Edit `ROLE_CAPABILITIES` in [`authorization.util.ts`](src/common/mcp/authorization.util.ts) (and each tool's `@RequireCapability(...)`) to adjust.
 

@@ -289,7 +289,7 @@ describe('CrmTools', () => {
       );
     });
 
-    it('does not let a lead agent use the generic assignment tool', async () => {
+    it('lets a lead agent assign while stripping actor attribution', async () => {
       backend.post.mockResolvedValue(leadPayload);
 
       const result = await tools.assignLead(
@@ -306,9 +306,17 @@ describe('CrmTools', () => {
         },
       );
 
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toMatch(/not authorized/i);
-      expect(backend.post).not.toHaveBeenCalled();
+      expect(result.isError).toBeFalsy();
+      expect(backend.post).toHaveBeenCalledWith(
+        '/api/v1/mcp/crm/leads/lead1/assign',
+        {
+          assignedTo: undefined,
+          teamId: 't1',
+          isRoundRobin: undefined,
+          actorUserId: undefined,
+        },
+        { headers: { 'x-tenant-id': TENANT } },
+      );
     });
 
     it('rejects when neither assignedTo nor teamId is given (no backend call)', async () => {
@@ -360,7 +368,7 @@ describe('CrmTools', () => {
   });
 
   describe('qualify_and_handoff', () => {
-    it('stores the phone and routes the current conversation through one backend call', async () => {
+    it('stores the phone and hands off an already-assigned lead', async () => {
       const payload = {
         id: 'lead1',
         firstName: 'Jane',
@@ -383,8 +391,6 @@ describe('CrmTools', () => {
           conversationId: 'conversation1',
           inboundMessageId: 'message1',
           phone: '+201012345678',
-          assignedTo: 'u2',
-          teamId: 'team1',
         },
         undefined,
         {
@@ -404,33 +410,9 @@ describe('CrmTools', () => {
         {
           inboundMessageId: 'message1',
           phone: '+201012345678',
-          assignedTo: 'u2',
-          teamId: 'team1',
         },
         { headers: { 'x-tenant-id': TENANT } },
       );
-    });
-
-    it('rejects a handoff without an assignment target', async () => {
-      const result = await tools.qualifyAndHandoff(
-        {
-          conversationId: 'conversation1',
-          inboundMessageId: 'message1',
-          phone: '+201012345678',
-          assignedTo: undefined as never,
-          teamId: 'team1',
-        },
-        undefined,
-        {
-          headers: {
-            'x-tenant-id': TENANT,
-            'x-actor-role': 'lead_agent',
-          },
-        },
-      );
-
-      expect(result.isError).toBe(true);
-      expect(backend.post).not.toHaveBeenCalled();
     });
 
     it('uses trusted run headers instead of model-provided turn ids in production', async () => {
@@ -456,8 +438,6 @@ describe('CrmTools', () => {
             conversationId: 'spoofed-conversation',
             inboundMessageId: 'spoofed-message',
             phone: '+201012345678',
-            assignedTo: 'u2',
-            teamId: 'team1',
           },
           undefined,
           {

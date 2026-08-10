@@ -65,8 +65,8 @@ const WRITE_ANNOTATIONS = {
 
 /**
  * CRM lead tools. Meta lead agents use the existing conversation lead, inspect
- * teams, then call meta_leads.qualify_and_handoff after collecting a phone. Staff can
- * also create and assign leads directly through the generic tools.
+ * teams, assign it with crm.assign_lead, then call
+ * meta_leads.qualify_and_handoff after collecting a phone.
  */
 @Injectable()
 export class CrmTools {
@@ -188,7 +188,7 @@ export class CrmTools {
   @Tool({
     name: 'crm.get_team',
     description:
-      "Returns one team's teamLead and members (each with id, name, roleName) plus its description and memberCount. After picking a team with crm.list_teams, call this to choose who should own the lead. Meta lead agents pass the route to meta_leads.qualify_and_handoff; staff may use crm.assign_lead. `teamLead` may be null (team with no designated lead).",
+      "Returns one team's teamLead and members (each with id, name, roleName) plus its description and memberCount. After picking a team with crm.list_teams, call this to choose who should own the lead, then call crm.assign_lead. `teamLead` may be null (team with no designated lead).",
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -232,7 +232,7 @@ export class CrmTools {
   @Tool({
     name: 'meta_leads.qualify_and_handoff',
     description:
-      'Completes the Meta lead qualification and starts human takeover in one operation. Call this only after the customer provides a phone number in the current message and the conversation supports a routing choice. It updates the existing lead, assigns it, and marks this exact inbound turn for handoff. The TechTrax backend sends deterministic transition copy after success. Never call crm.assign_lead for this Meta flow.',
+      'Stores the phone from the current inbound message and starts human takeover for an already-assigned Meta lead. Call crm.assign_lead first, then call this tool. It does not select a team or change assignment. The TechTrax backend sends deterministic transition copy after success.',
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -245,14 +245,6 @@ export class CrmTools {
         .string()
         .regex(/^\+?\d{7,16}$/)
         .describe('The phone number explicitly provided by the lead.'),
-      assignedTo: z
-        .string()
-        .min(1)
-        .describe('The selected team lead or sales team member id.'),
-      teamId: z
-        .string()
-        .min(1)
-        .describe('The team whose lead/member was selected.'),
       format: formatSchema.optional(),
     }),
     outputSchema: LeadHandoffOutputSchema,
@@ -266,8 +258,6 @@ export class CrmTools {
       conversationId: string;
       inboundMessageId: string;
       phone: string;
-      assignedTo: string;
-      teamId: string;
       format?: OutputFormat;
     },
     _context: unknown,
@@ -290,10 +280,6 @@ export class CrmTools {
         'Trusted x-conversation-id and x-inbound-message-id headers are required.',
       );
     }
-    if (!args.assignedTo || !args.teamId) {
-      return errorResult('Provide assignedTo and teamId before handing off.');
-    }
-
     try {
       const data = await this.postWithTenantHeader<LeadHandoffOutput>(
         tenantId,
@@ -301,8 +287,6 @@ export class CrmTools {
         {
           inboundMessageId,
           phone: args.phone,
-          assignedTo: args.assignedTo,
-          teamId: args.teamId,
         },
       );
       const parsed = LeadHandoffOutputSchema.parse(data);
@@ -320,7 +304,7 @@ export class CrmTools {
   @Tool({
     name: 'crm.assign_lead',
     description:
-      "Staff-only generic assignment for an EXISTING lead. Meta lead agents must use meta_leads.qualify_and_handoff instead. It does NOT create a lead; it re-owns `leadId` and notifies the new owner. There are THREE ways to choose the owner (decide from the lead's conversation + the teams' names/descriptions):\n" +
+      "Assigns an EXISTING lead and notifies the new owner. Meta lead agents must call this before meta_leads.qualify_and_handoff. It does NOT create a lead. There are THREE ways to choose the owner (decide from the lead's conversation + the teams' names/descriptions):\n" +
       '1. Specific person — pass `assignedTo` (a teamLead._id or members[]._id from crm.get_team). Use when the conversation points to one person. `teamId` is optional here (but if given, the user must belong to it).\n' +
       "2. Team lead — pass `teamId` only (no `assignedTo`, no `isRoundRobin`). The lead goes to that team's designated team lead.\n" +
       "3. Auto / round-robin — pass `teamId` + `isRoundRobin: true`. The backend fairly distributes across the team's MEMBERS (team lead excluded), load-aware: it picks whoever currently has the fewest open leads. Use when you just want the right TEAM to handle it and don't need a specific person.\n" +
