@@ -5,6 +5,8 @@ import { Tool } from '@rekog/mcp-nest';
 import { z } from 'zod';
 import { Injectable } from '@nestjs/common';
 import { RequireCapability } from '../common/mcp/tool-authorization.guard';
+import { BackendHttpService } from '../common/backend/backend-http.service';
+import { CrmTools } from '../tools/crm/crm.tools';
 import { ToolAccessService } from './tool-access.service';
 
 // A couple of fake tool providers so the service has something to discover.
@@ -31,7 +33,13 @@ describe('ToolAccessService', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [DiscoveryModule],
-      providers: [ToolAccessService, FakeStatsTool, FakePublicTool],
+      providers: [
+        ToolAccessService,
+        FakeStatsTool,
+        FakePublicTool,
+        CrmTools,
+        { provide: BackendHttpService, useValue: {} },
+      ],
     }).compile();
     await moduleRef.init();
     service = moduleRef.get(ToolAccessService);
@@ -75,6 +83,16 @@ describe('ToolAccessService', () => {
     expect(m.toolsByRole.receptionist).toEqual(
       expect.arrayContaining(['fake.public', 'fake.stats']),
     );
+    expect(m.namespaces).toEqual(expect.arrayContaining(['crm', 'meta_leads']));
+    expect(m.toolsByNamespace.meta_leads).toEqual([
+      'meta_leads.get_conversation_context',
+      'meta_leads.get_team',
+      'meta_leads.list_teams',
+      'meta_leads.qualify_and_handoff',
+    ]);
+    expect(m.toolsByRole.lead_agent).toEqual(
+      expect.arrayContaining(m.toolsByNamespace.meta_leads),
+    );
   });
 
   it('forRole returns only that role tools', () => {
@@ -84,5 +102,14 @@ describe('ToolAccessService', () => {
     expect(service.forRole('admin').tools.map((t) => t.name)).toEqual(
       expect.arrayContaining(['fake.public', 'fake.stats']),
     );
+
+    const leadAgent = service.forRole('lead_agent');
+    expect(leadAgent.namespaces).toContain('meta_leads');
+    expect(leadAgent.toolsByNamespace.meta_leads).toEqual([
+      'meta_leads.get_conversation_context',
+      'meta_leads.get_team',
+      'meta_leads.list_teams',
+      'meta_leads.qualify_and_handoff',
+    ]);
   });
 });

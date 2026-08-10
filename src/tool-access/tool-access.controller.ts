@@ -17,7 +17,7 @@ const isActorRole = (v: unknown): v is ActorRole =>
  * Plain HTTP discovery endpoint for the tool authorization policy.
  *
  *   GET /tool-access            → full matrix (every tool → allowed roles,
- *                                 plus each role's tool list + capabilities)
+ *                                 plus role, capability, and namespace views)
  *   GET /tool-access?role=patient → just the tools that one role may call
  *
  * This is read-only policy metadata (no PHI). `tools/list` is not role-filtered,

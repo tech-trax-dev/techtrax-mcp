@@ -48,19 +48,23 @@ To discover which role can actually call which tool (since the list isn't filter
 
 Because `tools/list` is not role-filtered, a plain HTTP endpoint (**not** an MCP tool) exposes the role → tool policy:
 
-- **`GET /tool-access`** → the full matrix:
+- **`GET /tool-access`** → the full matrix, including role and namespace views:
   ```jsonc
-  { "roles": ["patient", "doctor", "receptionist", "admin"],
-    "capabilitiesByRole": { "patient": ["clinic:read", "slots:read", "appointment:write"], "…": [] },
-    "tools": [ { "name": "statistics.get_appointment_summary", "capability": "statistics:read",
-                 "allowedRoles": ["doctor", "receptionist", "admin"] } ],
-    "toolsByRole": { "patient": ["…"], "receptionist": ["…"] } }
+  { "roles": ["patient", "doctor", "receptionist", "admin", "lead_agent"],
+    "capabilitiesByRole": { "lead_agent": ["clinic:read", "slots:read", "lead:read", "lead:handoff"], "…": [] },
+    "tools": [ { "name": "meta_leads.get_conversation_context", "capability": "lead:read",
+                 "allowedRoles": ["doctor", "receptionist", "admin", "lead_agent"] } ],
+    "toolsByRole": { "patient": ["…"], "lead_agent": ["meta_leads.get_conversation_context", "…"] },
+    "namespaces": ["appointment", "crm", "meta_leads", "statistics", "tenant_info"],
+    "toolsByNamespace": { "meta_leads": ["meta_leads.get_conversation_context", "meta_leads.get_team", "meta_leads.list_teams", "meta_leads.qualify_and_handoff"] } }
   ```
-- **`GET /tool-access?role=patient`** → just that role's callable tools:
+- **`GET /tool-access?role=lead_agent`** → only tools that the Meta lead role may call, also grouped by namespace:
   ```jsonc
-  { "role": "patient",
-    "capabilities": ["clinic:read", "slots:read", "appointment:write"],
-    "tools": [ { "name": "appointment.book", "capability": "appointment:write" } ] }
+  { "role": "lead_agent",
+    "capabilities": ["clinic:read", "slots:read", "lead:read", "lead:handoff"],
+    "tools": [ { "name": "meta_leads.get_conversation_context", "capability": "lead:read" } ],
+    "namespaces": ["appointment", "crm", "meta_leads", "tenant_info"],
+    "toolsByNamespace": { "meta_leads": ["meta_leads.get_conversation_context", "meta_leads.get_team", "meta_leads.list_teams", "meta_leads.qualify_and_handoff"] } }
   ```
   An unknown `role` returns HTTP `400`.
 
