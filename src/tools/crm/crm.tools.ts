@@ -232,7 +232,7 @@ export class CrmTools {
   @Tool({
     name: 'meta_leads.qualify_and_handoff',
     description:
-      'Stores the phone from the current inbound message and starts human takeover for an already-assigned Meta lead. Call crm.assign_lead first, then call this tool. It does not select a team or change assignment. The TechTrax backend sends deterministic transition copy after success.',
+      "Updates the user's phone number after the main agent collects the user's information. Use this tool to store the phone number and start human takeover for an already-assigned lead. It does not select a team or change assignment.",
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
