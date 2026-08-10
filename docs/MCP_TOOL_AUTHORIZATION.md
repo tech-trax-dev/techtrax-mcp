@@ -32,7 +32,6 @@ Development clients may still use `tenantId` and `actorRole` tool arguments for 
 | List / fetch any appointment in the clinic | `appointment.list_appointments` / `get_appointment` | ❌ | ✅ |
 | Tenant analytics | `statistics.*` | ❌ | ✅ |
 | CRM: list teams + members | `crm.list_teams` / `crm.get_team` (`lead:read`) | ❌ | ✅ |
-| CRM: create a lead | `crm.create_lead` (`lead:create`) | ❌ | ✅ (not `lead_agent`) |
 | CRM: assign a lead | `crm.assign_lead` (`lead:assign`) | ❌ | ✅ |
 
 The Meta lead agent reads through `crm.get_conversation_context`, `crm.list_teams`, and `crm.get_team`, then writes through `meta_leads.qualify_and_handoff`.

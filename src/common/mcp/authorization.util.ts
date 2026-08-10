@@ -39,7 +39,6 @@ export const CAPABILITIES = [
   'appointment:write', // book / reschedule / cancel
   'statistics:read', // tenant-wide analytics
   'lead:read', // CRM: list teams + members (for lead routing)
-  'lead:create', // CRM: create a lead record
   'lead:assign', // CRM: assign an existing lead to a team/member
   'lead:handoff', // CRM: store a qualified lead phone, assign, and hand off
 ] as const;
@@ -55,7 +54,6 @@ const STAFF: Capability[] = [
   'appointment:write',
   'statistics:read',
   'lead:read',
-  'lead:create',
   'lead:assign',
   'lead:handoff',
 ];

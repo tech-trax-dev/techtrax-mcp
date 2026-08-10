@@ -80,7 +80,6 @@ describe('authorization.util', () => {
         expect(roleCan(role, 'statistics:read')).toBe(true);
         expect(roleCan(role, 'patient:read')).toBe(true);
         expect(roleCan(role, 'lead:read')).toBe(true);
-        expect(roleCan(role, 'lead:create')).toBe(true);
         expect(roleCan(role, 'lead:assign')).toBe(true);
         expect(roleCan(role, 'lead:handoff')).toBe(true);
       }
@@ -88,7 +87,6 @@ describe('authorization.util', () => {
 
     it('patients cannot touch CRM leads', () => {
       expect(roleCan('patient', 'lead:read')).toBe(false);
-      expect(roleCan('patient', 'lead:create')).toBe(false);
       expect(roleCan('patient', 'lead:assign')).toBe(false);
       expect(roleCan('patient', 'lead:handoff')).toBe(false);
     });
@@ -102,7 +100,6 @@ describe('authorization.util', () => {
       ]);
       expect(roleCan('lead_agent', 'lead:handoff')).toBe(true);
       expect(roleCan('lead_agent', 'lead:assign')).toBe(false);
-      expect(roleCan('lead_agent', 'lead:create')).toBe(false);
       expect(roleCan('lead_agent', 'patient:read')).toBe(false);
       expect(roleCan('lead_agent', 'appointment:read')).toBe(false);
       expect(roleCan('lead_agent', 'appointment:write')).toBe(false);
@@ -134,11 +131,6 @@ describe('authorization.util', () => {
         'receptionist',
         'admin',
         'lead_agent',
-      ]);
-      expect(rolesWithCapability('lead:create')).toEqual([
-        'doctor',
-        'receptionist',
-        'admin',
       ]);
     });
   });

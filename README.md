@@ -91,7 +91,6 @@ Policy lives in [`src/common/mcp/authorization.util.ts`](src/common/mcp/authoriz
 | `appointment:read` | `appointment.list_appointments` / `get_appointment` | ❌ | ✅ |
 | `statistics:read` | `statistics.*` | ❌ | ✅ |
 | `lead:read` | `crm.list_teams` / `crm.get_team` | ❌ | ✅ |
-| `lead:create` | `crm.create_lead` | ❌ | ✅ (not `lead_agent`) |
 | `lead:assign` | `crm.assign_lead` | ❌ | ✅ |
 
 Meta lead reads use `crm.get_conversation_context`, `crm.list_teams`, and `crm.get_team`. The restricted write operation remains `meta_leads.qualify_and_handoff`.

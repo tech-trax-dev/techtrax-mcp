@@ -75,7 +75,7 @@ export class CrmTools {
   @Tool({
     name: 'crm.get_conversation_context',
     description:
-      'Loads the existing Meta lead, current owner, conversation state, channel type, and recent messages in chronological order. Use this before routing a lead. The lead already exists: never call crm.create_lead for this conversation. After collecting a phone and choosing a route, use meta_leads.qualify_and_handoff.',
+      'Loads the existing Meta lead, current owner, conversation state, channel type, and recent messages in chronological order. Use this before routing a lead. The lead already exists. After collecting a phone and choosing a route, use meta_leads.qualify_and_handoff.',
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -126,82 +126,6 @@ export class CrmTools {
       return errorResult(
         `Failed to load conversation context: ${(e as Error).message}`,
       );
-    }
-  }
-
-  @Tool({
-    name: 'crm.create_lead',
-    description:
-      "Creates a NEW lead (customer record) from details gathered in a conversation — use this the moment a customer shares who they are (name + phone). It creates the lead UNASSIGNED (no owner yet); you then route it with crm.list_teams → crm.assign_lead. Required: firstName, lastName, phone. Optional: email, address (their location/area), priority. Leads are de-duplicated by phone (and email) within the tenant — if an active lead with that phone/email already exists the call fails (409 'already exists'), so you don't create duplicates. Returns the created lead (its `id` is what you pass as `leadId` to crm.assign_lead; `assignedTo` will be null until you assign it).",
-    parameters: z.object({
-      tenantId: tenantIdParam,
-      actorRole: actorRoleParam,
-      firstName: z.string().min(1).describe("The customer's first name."),
-      lastName: z.string().min(1).describe("The customer's last name."),
-      phone: z
-        .string()
-        .min(1)
-        .describe(
-          'Phone number — digits, optional leading + (e.g. 01204045635 or +201204045635).',
-        ),
-      email: z.string().email().optional().describe('Optional email address.'),
-      address: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          "Optional location/address the customer mentioned (e.g. 'Shubra Hares, Toukh, Qalyubia').",
-        ),
-      priority: z
-        .enum(['low', 'high'])
-        .optional()
-        .describe('Optional lead priority. Defaults to low.'),
-      format: formatSchema.optional(),
-    }),
-    outputSchema: LeadAssignmentOutputSchema,
-    annotations: WRITE_ANNOTATIONS,
-  })
-  @RequireCapability('lead:create')
-  async createLead(
-    args: {
-      tenantId?: string;
-      actorRole?: ActorRole;
-      firstName: string;
-      lastName: string;
-      phone: string;
-      email?: string;
-      address?: string;
-      priority?: 'low' | 'high';
-      format?: OutputFormat;
-    },
-    _context: unknown,
-    request?: ToolRequest,
-  ): Promise<McpToolResult> {
-    const format = args.format ?? 'json';
-    const tenantId = resolveTenantId(request, args);
-    if (!tenantId) return missingTenant();
-
-    try {
-      const data = await this.postWithTenantHeader<LeadAssignmentOutput>(
-        tenantId,
-        '/api/v1/mcp/crm/leads',
-        {
-          firstName: args.firstName,
-          lastName: args.lastName,
-          phone: args.phone,
-          email: args.email,
-          address: args.address,
-          priority: args.priority,
-        },
-      );
-      return this.formatResult(data, format, (p) => this.renderCreatedLead(p));
-    } catch (e) {
-      if (e instanceof BackendException && e.status === 409) {
-        return errorResult(
-          `A lead with this phone or email already exists. ${(e as Error).message}`,
-        );
-      }
-      return errorResult(`Failed to create lead: ${(e as Error).message}`);
     }
   }
 
@@ -308,7 +232,7 @@ export class CrmTools {
   @Tool({
     name: 'meta_leads.qualify_and_handoff',
     description:
-      'Completes the Meta lead qualification and starts human takeover in one operation. Call this only after the customer provides a phone number in the current message and the conversation supports a routing choice. It updates the existing lead, assigns it, and marks this exact inbound turn for handoff. The TechTrax backend sends deterministic transition copy after success. Never call crm.create_lead or crm.assign_lead for this Meta flow.',
+      'Completes the Meta lead qualification and starts human takeover in one operation. Call this only after the customer provides a phone number in the current message and the conversation supports a routing choice. It updates the existing lead, assigns it, and marks this exact inbound turn for handoff. The TechTrax backend sends deterministic transition copy after success. Never call crm.assign_lead for this Meta flow.',
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -578,21 +502,6 @@ export class CrmTools {
       `- **Handoff:** ${data.handoffStatus}`,
       '',
       'Tell the customer to send their next message for the assigned sales representative.',
-    ].join('\n');
-  }
-
-  private renderCreatedLead(data: LeadAssignmentOutput): string {
-    const name =
-      `${data.firstName ?? ''} ${data.lastName ?? ''}`.trim() || data.id;
-    return [
-      '# Lead created',
-      '',
-      `- **Lead:** ${name} (${data.id})`,
-      `- **Phone:** ${data.phone ?? 'N/A'}`,
-      `- **Status:** ${data.status ?? 'N/A'}`,
-      `- **Assigned to:** ${data.assignedTo ?? 'unassigned — route it with crm.assign_lead'}`,
-      '',
-      `Next: pick a team with crm.list_teams, then call crm.assign_lead with leadId=${data.id}.`,
     ].join('\n');
   }
 }
