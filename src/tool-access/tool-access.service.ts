@@ -73,9 +73,25 @@ export class ToolAccessService {
     return tools.sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  private groupByNamespace(
+    tools: ReadonlyArray<{ name: string }>,
+  ): Record<string, string[]> {
+    const grouped: Record<string, string[]> = {};
+
+    for (const tool of tools) {
+      const namespace = tool.name.split('.', 1)[0] || 'other';
+      (grouped[namespace] ??= []).push(tool.name);
+    }
+
+    return Object.fromEntries(
+      Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)),
+    );
+  }
+
   /** Full matrix: policy per role + every tool's access + tools grouped by role. */
   matrix() {
     const tools = this.listTools();
+    const toolsByNamespace = this.groupByNamespace(tools);
     const byRole = Object.fromEntries(
       ACTOR_ROLES.map((role) => [
         role,
@@ -88,6 +104,8 @@ export class ToolAccessService {
       capabilitiesByRole: ROLE_CAPABILITIES,
       tools,
       toolsByRole: byRole,
+      namespaces: Object.keys(toolsByNamespace),
+      toolsByNamespace,
     };
   }
 
@@ -96,6 +114,13 @@ export class ToolAccessService {
     const tools = this.listTools()
       .filter((t) => t.allowedRoles.includes(role))
       .map((t) => ({ name: t.name, capability: t.capability }));
-    return { role, capabilities: ROLE_CAPABILITIES[role], tools };
+    const toolsByNamespace = this.groupByNamespace(tools);
+    return {
+      role,
+      capabilities: ROLE_CAPABILITIES[role],
+      tools,
+      namespaces: Object.keys(toolsByNamespace),
+      toolsByNamespace,
+    };
   }
 }
