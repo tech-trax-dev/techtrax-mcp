@@ -21,7 +21,7 @@ describe('CrmTools', () => {
     tools = new CrmTools(backend as never);
   });
 
-  it('registers the full Meta lead toolset and keeps the CRM team tools', () => {
+  it('keeps lead reads under CRM and only handoff under Meta leads', () => {
     const prototype = CrmTools.prototype as unknown as Record<
       string,
       (...args: unknown[]) => unknown
@@ -36,16 +36,16 @@ describe('CrmTools', () => {
     };
 
     expect(toolName('getConversationContext')).toBe(
-      'meta_leads.get_conversation_context',
+      'crm.get_conversation_context',
     );
-    expect(toolName('listMetaLeadTeams')).toBe('meta_leads.list_teams');
-    expect(toolName('getMetaLeadTeam')).toBe('meta_leads.get_team');
     expect(toolName('qualifyAndHandoff')).toBe(
       'meta_leads.qualify_and_handoff',
     );
 
     expect(toolName('listTeams')).toBe('crm.list_teams');
     expect(toolName('getTeam')).toBe('crm.get_team');
+    expect(toolName('listMetaLeadTeams')).toBeUndefined();
+    expect(toolName('getMetaLeadTeam')).toBeUndefined();
   });
 
   describe('create_lead', () => {

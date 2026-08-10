@@ -6,17 +6,17 @@ import type { ToolRequest } from './tenant.util';
 /**
  * Tool authorization for the MCP server.
  *
- * Production callers bind role through trusted request identity or the
- * `x-actor-role` header. Development clients may use the `actorRole` tool
- * argument for compatibility. Missing or unrecognised roles fall back to
- * `DEFAULT_ACTOR_ROLE` (`patient`, least privilege).
+ * Callers bind role through trusted request identity, the `x-actor-role`
+ * header, or the `actorRole` tool argument (in that priority order). Missing
+ * or unrecognised roles fall back to `DEFAULT_ACTOR_ROLE` (`patient`, least
+ * privilege).
  *
  * `tools/list` is not filtered by role; enforcement happens on each call. A
  * role that lacks a tool's capability receives a "not authorized" result and
  * the backend is never hit. `GET /tool-access` exposes the policy matrix.
  *
- * Model-produced role arguments are never trusted in production. The API key
- * authenticates the client; trusted tenant and role headers scope the call.
+ * The API key authenticates the client. Deployments that let the model choose
+ * `actorRole` must scope that API key to a trusted agent service.
  *
  * Roles/capabilities are inspired by the backend permission model but are
  * intentionally coarse — the MCP surface is small.
@@ -97,21 +97,19 @@ const isActorRole = (value: unknown): value is ActorRole =>
 export const DEFAULT_ACTOR_ROLE: ActorRole = 'patient';
 
 /**
- * Development compatibility parameter. Production identity comes from the
- * trusted request and ignores this model-produced value.
+ * Tool argument fallback used when trusted request identity/header is absent.
  */
 export const actorRoleParam = z
   .enum([...ACTOR_ROLES] as [ActorRole, ...ActorRole[]])
   .describe(
     'Who the AI is acting for: patient | doctor | receptionist | admin | lead_agent. ' +
-      'Development compatibility only; production clients must send the ' +
-      'trusted x-actor-role header. Omit for patient least privilege.',
+      'Trusted request identity/header takes priority. Omit for patient least privilege.',
   )
   .optional();
 
 /**
- * Resolve trusted request identity first. Development may fall back to the
- * tool argument; production never does. Unknown roles resolve to patient.
+ * Resolve trusted request identity first, then fall back to the tool argument.
+ * Unknown roles resolve to patient.
  */
 export const resolveActorRole = (
   request?: ToolRequest,
@@ -121,7 +119,7 @@ export const resolveActorRole = (
   const raw =
     request?.user?.role ??
     (Array.isArray(headerValue) ? headerValue[0] : headerValue) ??
-    (process.env.NODE_ENV === 'production' ? undefined : args?.actorRole);
+    args?.actorRole;
   const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   return isActorRole(normalized) ? normalized : DEFAULT_ACTOR_ROLE;
 };

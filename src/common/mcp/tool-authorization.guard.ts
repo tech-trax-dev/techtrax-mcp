@@ -6,10 +6,9 @@ import type { ToolRequest } from './tenant.util';
 /**
  * Capability-based tool authorization.
  *
- * Production callers bind role through trusted request identity/headers;
- * development clients may use the tool argument for compatibility. This
- * decorator resolves the role at call time and blocks unauthorized handlers
- * before they can reach the backend.
+ * Trusted request identity/headers take priority, then callers may use the
+ * actorRole tool argument. This decorator resolves the role at call time and
+ * blocks unauthorized handlers before they can reach the backend.
  *
  * `tools/list` is not role-filtered; enforcement is per-call. The
  * `GET /tool-access` endpoint exposes the role-to-tool policy.

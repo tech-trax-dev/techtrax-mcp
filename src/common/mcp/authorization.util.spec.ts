@@ -48,12 +48,12 @@ describe('authorization.util', () => {
       ).toBe('lead_agent');
     });
 
-    it('does not trust a model-supplied elevated role in production', () => {
+    it('uses the actorRole argument as a fallback in production', () => {
       const previous = process.env.NODE_ENV;
       process.env.NODE_ENV = 'production';
       try {
-        expect(resolveActorRole(undefined, { actorRole: 'admin' })).toBe(
-          'patient',
+        expect(resolveActorRole(undefined, { actorRole: 'lead_agent' })).toBe(
+          'lead_agent',
         );
       } finally {
         process.env.NODE_ENV = previous;
@@ -196,6 +196,18 @@ describe('RequireCapability decorator (per-call enforcement)', () => {
     const host = new Host();
     expect(host.run({ actorRole: 'receptionist' })).toEqual({ ok: true });
     expect(host.calls).toBe(1);
+  });
+
+  it('accepts the actorRole argument in production when no trusted role is present', () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const host = new Host();
+      expect(host.run({ actorRole: 'receptionist' })).toEqual({ ok: true });
+      expect(host.calls).toBe(1);
+    } finally {
+      process.env.NODE_ENV = previous;
+    }
   });
 
   it('blocks the handler (isError, no invocation) for an unauthorized role', () => {

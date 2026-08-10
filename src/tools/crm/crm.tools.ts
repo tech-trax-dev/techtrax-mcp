@@ -73,7 +73,7 @@ export class CrmTools {
   constructor(private readonly backend: BackendHttpService) {}
 
   @Tool({
-    name: 'meta_leads.get_conversation_context',
+    name: 'crm.get_conversation_context',
     description:
       'Loads the existing Meta lead, current owner, conversation state, channel type, and recent messages in chronological order. Use this before routing a lead. The lead already exists: never call crm.create_lead for this conversation. After collecting a phone and choosing a route, use meta_leads.qualify_and_handoff.',
     parameters: z.object({
@@ -206,42 +206,6 @@ export class CrmTools {
   }
 
   @Tool({
-    name: 'meta_leads.list_teams',
-    description:
-      "Lists the workspace's teams so a Meta lead can be routed to the right one. Returns each team's id, name, description, member count, team lead name, status, and reserved status. Read the descriptions, skip the system-reserved Unassigned team, choose the best fit, then call meta_leads.get_team.",
-    parameters: z.object({
-      tenantId: tenantIdParam,
-      actorRole: actorRoleParam,
-      status: z
-        .enum(['active', 'archived'])
-        .optional()
-        .describe('Filter by team status. Defaults to active.'),
-      search: z.string().min(1).optional().describe('Filter teams by name.'),
-      page: z.number().int().positive().optional(),
-      limit: z.number().int().positive().max(100).optional(),
-      format: formatSchema.optional(),
-    }),
-    outputSchema: TeamsListOutputSchema,
-    annotations: READ_ANNOTATIONS,
-  })
-  @RequireCapability('lead:read')
-  async listMetaLeadTeams(
-    args: {
-      tenantId?: string;
-      actorRole?: ActorRole;
-      status?: 'active' | 'archived';
-      search?: string;
-      page?: number;
-      limit?: number;
-      format?: OutputFormat;
-    },
-    context: unknown,
-    request?: ToolRequest,
-  ): Promise<McpToolResult> {
-    return this.listTeams(args, context, request);
-  }
-
-  @Tool({
     name: 'crm.list_teams',
     description:
       "Lists the workspace's teams so you can route a lead to the right one. Returns per team: id, name, description (what the team handles — use this + the team name to match the lead's conversation), memberCount, teamLeadName, status, isSystemReserved. Step 1 of assigning a lead: read the descriptions, pick the best-fit team, then call crm.get_team for its members. Paginated (read pagination.pages). Note: the system-reserved 'Unassigned' team (isSystemReserved=true) is the no-owner bucket — don't assign real leads to it.",
@@ -295,33 +259,6 @@ export class CrmTools {
     } catch (e) {
       return errorResult(`Failed to list teams: ${(e as Error).message}`);
     }
-  }
-
-  @Tool({
-    name: 'meta_leads.get_team',
-    description:
-      "Returns a routing team's team lead and members, including each person's id, name, and role. Use the result to choose a concrete sales representative, then pass that person's id and the matching team id to meta_leads.qualify_and_handoff.",
-    parameters: z.object({
-      tenantId: tenantIdParam,
-      actorRole: actorRoleParam,
-      teamId: z.string().min(1),
-      format: formatSchema.optional(),
-    }),
-    outputSchema: TeamDetailOutputSchema,
-    annotations: READ_ANNOTATIONS,
-  })
-  @RequireCapability('lead:read')
-  async getMetaLeadTeam(
-    args: {
-      tenantId?: string;
-      actorRole?: ActorRole;
-      teamId: string;
-      format?: OutputFormat;
-    },
-    context: unknown,
-    request?: ToolRequest,
-  ): Promise<McpToolResult> {
-    return this.getTeam(args, context, request);
   }
 
   @Tool({
