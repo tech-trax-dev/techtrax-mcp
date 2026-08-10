@@ -65,7 +65,7 @@ const WRITE_ANNOTATIONS = {
 
 /**
  * CRM lead tools. Meta lead agents use the existing conversation lead, inspect
- * teams, then call crm.qualify_and_handoff after collecting a phone. Staff can
+ * teams, then call meta_leads.qualify_and_handoff after collecting a phone. Staff can
  * also create and assign leads directly through the generic tools.
  */
 @Injectable()
@@ -73,9 +73,9 @@ export class CrmTools {
   constructor(private readonly backend: BackendHttpService) {}
 
   @Tool({
-    name: 'crm.get_conversation_context',
+    name: 'meta_leads.get_conversation_context',
     description:
-      'Loads the existing Meta lead, current owner, conversation state, channel type, and recent messages in chronological order. Use this before routing a lead. The lead already exists: never call crm.create_lead for this conversation. After collecting a phone and choosing a route, use crm.qualify_and_handoff.',
+      'Loads the existing Meta lead, current owner, conversation state, channel type, and recent messages in chronological order. Use this before routing a lead. The lead already exists: never call crm.create_lead for this conversation. After collecting a phone and choosing a route, use meta_leads.qualify_and_handoff.',
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -264,7 +264,7 @@ export class CrmTools {
   @Tool({
     name: 'crm.get_team',
     description:
-      "Returns one team's teamLead and members (each with id, name, roleName) plus its description and memberCount. After picking a team with crm.list_teams, call this to choose who should own the lead. Meta lead agents pass the route to crm.qualify_and_handoff; staff may use crm.assign_lead. `teamLead` may be null (team with no designated lead).",
+      "Returns one team's teamLead and members (each with id, name, roleName) plus its description and memberCount. After picking a team with crm.list_teams, call this to choose who should own the lead. Meta lead agents pass the route to meta_leads.qualify_and_handoff; staff may use crm.assign_lead. `teamLead` may be null (team with no designated lead).",
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -306,7 +306,7 @@ export class CrmTools {
   }
 
   @Tool({
-    name: 'crm.qualify_and_handoff',
+    name: 'meta_leads.qualify_and_handoff',
     description:
       'Completes the Meta lead qualification and starts human takeover in one operation. Call this only after the customer provides a phone number in the current message and the conversation supports a routing choice. It updates the existing lead, assigns it, and marks this exact inbound turn for handoff. The TechTrax backend sends deterministic transition copy after success. Never call crm.create_lead or crm.assign_lead for this Meta flow.',
     parameters: z.object({
@@ -396,7 +396,7 @@ export class CrmTools {
   @Tool({
     name: 'crm.assign_lead',
     description:
-      "Staff-only generic assignment for an EXISTING lead. Meta lead agents must use crm.qualify_and_handoff instead. It does NOT create a lead; it re-owns `leadId` and notifies the new owner. There are THREE ways to choose the owner (decide from the lead's conversation + the teams' names/descriptions):\n" +
+      "Staff-only generic assignment for an EXISTING lead. Meta lead agents must use meta_leads.qualify_and_handoff instead. It does NOT create a lead; it re-owns `leadId` and notifies the new owner. There are THREE ways to choose the owner (decide from the lead's conversation + the teams' names/descriptions):\n" +
       '1. Specific person — pass `assignedTo` (a teamLead._id or members[]._id from crm.get_team). Use when the conversation points to one person. `teamId` is optional here (but if given, the user must belong to it).\n' +
       "2. Team lead — pass `teamId` only (no `assignedTo`, no `isRoundRobin`). The lead goes to that team's designated team lead.\n" +
       "3. Auto / round-robin — pass `teamId` + `isRoundRobin: true`. The backend fairly distributes across the team's MEMBERS (team lead excluded), load-aware: it picks whoever currently has the fewest open leads. Use when you just want the right TEAM to handle it and don't need a specific person.\n" +
