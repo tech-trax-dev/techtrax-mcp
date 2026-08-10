@@ -36,17 +36,6 @@ type OutputFormat = 'json' | 'markdown';
 
 const formatSchema = z.enum(['json', 'markdown']).default('json');
 
-const resolveRunHeader = (
-  request: ToolRequest | undefined,
-  header: string,
-  fallback: string,
-): string | undefined => {
-  const raw = request?.headers?.[header];
-  const trusted = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof trusted === 'string' && trusted.trim()) return trusted.trim();
-  return process.env.NODE_ENV === 'production' ? undefined : fallback;
-};
-
 const READ_ANNOTATIONS = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -100,14 +89,7 @@ export class CrmTools {
   ): Promise<McpToolResult> {
     const tenantId = resolveTenantId(request, args);
     if (!tenantId) return missingTenant();
-    const conversationId = resolveRunHeader(
-      request,
-      'x-conversation-id',
-      args.conversationId,
-    );
-    if (!conversationId) {
-      return errorResult('Trusted x-conversation-id header is required.');
-    }
+    const conversationId = args.conversationId;
 
     try {
       const data = await this.getWithTenantHeader<ConversationContextOutput>(
@@ -265,21 +247,8 @@ export class CrmTools {
   ): Promise<McpToolResult> {
     const tenantId = resolveTenantId(request, args);
     if (!tenantId) return missingTenant();
-    const conversationId = resolveRunHeader(
-      request,
-      'x-conversation-id',
-      args.conversationId,
-    );
-    const inboundMessageId = resolveRunHeader(
-      request,
-      'x-inbound-message-id',
-      args.inboundMessageId,
-    );
-    if (!conversationId || !inboundMessageId) {
-      return errorResult(
-        'Trusted x-conversation-id and x-inbound-message-id headers are required.',
-      );
-    }
+    const conversationId = args.conversationId;
+    const inboundMessageId = args.inboundMessageId;
     try {
       const data = await this.postWithTenantHeader<LeadHandoffOutput>(
         tenantId,

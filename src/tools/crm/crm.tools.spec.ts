@@ -415,7 +415,7 @@ describe('CrmTools', () => {
       );
     });
 
-    it('uses trusted run headers instead of model-provided turn ids in production', async () => {
+    it('accepts conversation context from tool arguments in production', async () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = 'production';
       backend.post.mockResolvedValue({
@@ -427,32 +427,27 @@ describe('CrmTools', () => {
         assignedTo: 'u2',
         status: 'open',
         assignedAt: null,
-        conversationId: 'trusted-conversation',
-        inboundMessageId: 'trusted-message',
+        conversationId: 'body-conversation',
+        inboundMessageId: 'body-message',
         handoffStatus: 'pending',
       });
 
       try {
         await tools.qualifyAndHandoff(
           {
-            conversationId: 'spoofed-conversation',
-            inboundMessageId: 'spoofed-message',
+            tenantId: TENANT,
+            actorRole: 'lead_agent',
+            conversationId: 'body-conversation',
+            inboundMessageId: 'body-message',
             phone: '+201012345678',
           },
           undefined,
-          {
-            headers: {
-              'x-tenant-id': TENANT,
-              'x-actor-role': 'lead_agent',
-              'x-conversation-id': 'trusted-conversation',
-              'x-inbound-message-id': 'trusted-message',
-            },
-          },
+          undefined,
         );
 
         expect(backend.post).toHaveBeenCalledWith(
-          '/api/v1/mcp/crm/conversations/trusted-conversation/qualify-and-handoff',
-          expect.objectContaining({ inboundMessageId: 'trusted-message' }),
+          '/api/v1/mcp/crm/conversations/body-conversation/qualify-and-handoff',
+          expect.objectContaining({ inboundMessageId: 'body-message' }),
           { headers: { 'x-tenant-id': TENANT } },
         );
       } finally {

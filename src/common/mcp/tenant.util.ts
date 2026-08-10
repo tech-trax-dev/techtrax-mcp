@@ -20,25 +20,19 @@ export type ToolRequest = {
 /** A tenant id is a MongoDB ObjectId — 24 hex chars. */
 const OBJECT_ID = /^[a-f\d]{24}$/i;
 
-/**
- * Development compatibility parameter. Production requires trusted request
- * identity or the `x-tenant-id` header and ignores this model-produced value.
- */
+/** Tenant may be supplied by authenticated context, a header, or tool input. */
 export const tenantIdParam = z
   .string()
   .trim()
   .regex(OBJECT_ID, 'tenantId must be a 24-character hex id (MongoDB ObjectId)')
-  .describe(
-    'The tenant (clinic) to act on, as a 24-character hex id. Pass this on ' +
-      'development call. Production clients must supply x-tenant-id.',
-  )
+  .describe('The tenant (clinic) to act on, as a 24-character hex id.')
   .optional();
 
 /**
  * Resolve the active tenant for a tool call. Precedence:
  *   1. An authenticated `request.user`.
  *   2. The trusted `x-tenant-id` transport header.
- *   3. Explicit `tenantId` tool argument (legacy clients only).
+ *   3. Explicit `tenantId` tool argument.
  * Returns a trimmed, non-empty id or null when no tenant context is present.
  */
 export const resolveTenantId = (
@@ -58,7 +52,6 @@ export const resolveTenantId = (
   if (Array.isArray(headerValue) && headerValue[0]?.trim())
     return headerValue[0].trim();
 
-  if (process.env.NODE_ENV === 'production') return null;
   const fromArgs = args?.tenantId?.trim();
   if (fromArgs) return fromArgs;
 

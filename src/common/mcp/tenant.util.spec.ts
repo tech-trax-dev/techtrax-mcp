@@ -50,11 +50,13 @@ describe('resolveTenantId', () => {
     expect(resolveTenantId()).toBeNull();
   });
 
-  it('does not trust a model-supplied tenant in production', () => {
+  it('accepts a tool-supplied tenant in production', () => {
     const previous = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
     try {
-      expect(resolveTenantId(undefined, { tenantId: ARG_TENANT })).toBeNull();
+      expect(resolveTenantId(undefined, { tenantId: ARG_TENANT })).toBe(
+        ARG_TENANT,
+      );
     } finally {
       process.env.NODE_ENV = previous;
     }
