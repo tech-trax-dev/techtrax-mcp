@@ -35,6 +35,8 @@ Development clients may still use `tenantId` and `actorRole` tool arguments for 
 | CRM: create a lead | `crm.create_lead` (`lead:create`) | ❌ | ✅ (not `lead_agent`) |
 | CRM: assign a lead | `crm.assign_lead` (`lead:assign`) | ❌ | ✅ |
 
+The Meta lead agent uses the four-tool `meta_leads.*` workflow. `meta_leads.list_teams` and `meta_leads.get_team` share the same `lead:read` policy and backend behavior as their original `crm.*` counterparts.
+
 The role is only known at call time, so enforcement is **per-call** against each tool's capability:
 
 - **`tools/list` is NOT filtered.** Every tool is always listed for every caller (the role isn't known until a tool is called). A `patient` **sees** `statistics.*`, `crm.*`, `find_patient`, and `list_appointments` / `get_appointment` in the catalog — but calling them is rejected.
