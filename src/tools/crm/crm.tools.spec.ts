@@ -21,6 +21,28 @@ describe('CrmTools', () => {
     tools = new CrmTools(backend as never);
   });
 
+  it('registers Meta lead tools separately while keeping team tools under CRM', () => {
+    const prototype = CrmTools.prototype as unknown as Record<
+      string,
+      (...args: unknown[]) => unknown
+    >;
+    const toolName = (method: string) => {
+      const metadata = Reflect.getMetadata('mcp:tool', prototype[method]) as
+        | { name?: unknown }
+        | undefined;
+      return typeof metadata?.name === 'string' ? metadata.name : undefined;
+    };
+
+    expect(toolName('getConversationContext')).toBe(
+      'meta_leads.get_conversation_context',
+    );
+    expect(toolName('listTeams')).toBe('crm.list_teams');
+    expect(toolName('getTeam')).toBe('crm.get_team');
+    expect(toolName('qualifyAndHandoff')).toBe(
+      'meta_leads.qualify_and_handoff',
+    );
+  });
+
   describe('create_lead', () => {
     const leadPayload = {
       id: 'lead9',
