@@ -543,6 +543,62 @@ describe('CrmTools', () => {
       ).not.toThrow();
     });
 
+    it('keeps the Unassigned team available when it has a possible direct assignee', async () => {
+      backend.get.mockResolvedValue({
+        teams: [
+          {
+            id: 'unassigned',
+            name: 'Unassigned',
+            description: '',
+            memberCount: 1,
+            teamLeadName: null,
+            status: 'active',
+            isSystemReserved: true,
+          },
+        ],
+        pagination: { page: 1, limit: 100, total: 1, pages: 1 },
+      });
+
+      const result = await tools.listMetaLeadTeams(
+        { tenantId: TENANT, actorRole: 'lead_agent' },
+        undefined,
+        req,
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(() =>
+        TeamsListOutputSchema.parse(result.structuredContent),
+      ).not.toThrow();
+    });
+
+    it('reports no assignable members when every team is empty', async () => {
+      backend.get.mockResolvedValue({
+        teams: [
+          {
+            id: 'unassigned',
+            name: 'Unassigned',
+            description: '',
+            memberCount: 0,
+            teamLeadName: null,
+            status: 'active',
+            isSystemReserved: true,
+          },
+        ],
+        pagination: { page: 1, limit: 100, total: 1, pages: 1 },
+      });
+
+      const result = await tools.listMetaLeadTeams(
+        { tenantId: TENANT, actorRole: 'lead_agent' },
+        undefined,
+        req,
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe(
+        'No assignable members are configured for this tenant.',
+      );
+    });
+
     it('gets a team from the Meta leads namespace', async () => {
       backend.get.mockResolvedValue({
         id: 't1',
