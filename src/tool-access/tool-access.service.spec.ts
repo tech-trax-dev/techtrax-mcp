@@ -85,6 +85,8 @@ describe('ToolAccessService', () => {
     );
     expect(m.namespaces).toEqual(expect.arrayContaining(['crm', 'meta_leads']));
     expect(m.toolsByNamespace.meta_leads).toEqual([
+      'meta_leads.get_team',
+      'meta_leads.list_teams',
       'meta_leads.qualify_and_handoff',
     ]);
     expect(m.toolsByRole.lead_agent).toEqual(
@@ -103,6 +105,8 @@ describe('ToolAccessService', () => {
     const leadAgent = service.forRole('lead_agent');
     expect(leadAgent.namespaces).toContain('meta_leads');
     expect(leadAgent.toolsByNamespace.meta_leads).toEqual([
+      'meta_leads.get_team',
+      'meta_leads.list_teams',
       'meta_leads.qualify_and_handoff',
     ]);
   });
