@@ -214,7 +214,7 @@ export class CrmTools {
   @Tool({
     name: 'meta_leads.list_teams',
     description:
-      "Lists the workspace's teams so a Meta lead can be routed after the user provides a phone number. Returns each team's id, name, description, member count, team lead name, status, and reserved status. Skip the system-reserved Unassigned team, choose the best fit, then call meta_leads.get_team if member details are needed.",
+      "Lists the workspace's teams so a Meta lead can be routed after the user provides a phone number. Returns each team's id, name, description, member count, team lead name, status, and reserved status. The system-reserved Unassigned team may be used to discover a direct assignee: call meta_leads.get_team, then pass the returned person as assignedTo without its teamId. For regular teams, choose the best fit and call meta_leads.get_team if member details are needed.",
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -244,13 +244,23 @@ export class CrmTools {
     context: unknown,
     request?: ToolRequest,
   ): Promise<McpToolResult> {
-    return this.listTeams(args, context, request);
+    const result = await this.listTeams(args, context, request);
+    const data = result.structuredContent as TeamsListOutput | undefined;
+    const hasAssignableMember = data?.teams.some(
+      (team) => team.memberCount > 0 || Boolean(team.teamLeadName),
+    );
+    if (!result.isError && !hasAssignableMember) {
+      return errorResult(
+        'No assignable members are configured for this tenant.',
+      );
+    }
+    return result;
   }
 
   @Tool({
     name: 'meta_leads.get_team',
     description:
-      "Returns one team's teamLead and members so a Meta lead can be assigned during meta_leads.qualify_and_handoff. Use the returned team id as teamId, or a returned user id as assignedTo.",
+      "Returns one team's teamLead and members so a Meta lead can be assigned during meta_leads.qualify_and_handoff. For a regular team, use its id as teamId or a returned user id as assignedTo. For the system-reserved Unassigned team, use a returned person only as assignedTo and omit teamId.",
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -277,7 +287,7 @@ export class CrmTools {
   @Tool({
     name: 'meta_leads.qualify_and_handoff',
     description:
-      "Updates the user's phone number after the main agent collects it, assigns the lead, and starts human takeover. The phone must be explicitly present in the current inbound message. Do not call this before collecting the phone. Provide either assignedTo or teamId/isRoundRobin so assignment happens only after the phone is stored.",
+      "Updates the user's phone number after the main agent collects it, assigns the lead, and starts human takeover. The phone must be explicitly present in the current inbound message. Do not call this before collecting the phone. Provide either assignedTo or teamId/isRoundRobin so assignment happens only after the phone is stored. When assigning a person discovered through the system-reserved Unassigned team, provide assignedTo only and omit teamId.",
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
