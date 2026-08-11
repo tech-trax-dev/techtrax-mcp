@@ -218,6 +218,12 @@ export class CrmTools {
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
+      leadId: z
+        .string()
+        .min(1)
+        .describe(
+          'The existing lead id from agent_metadata.lead_id. Do not infer it.',
+        ),
       conversationId: z.string().min(1),
       inboundMessageId: z
         .string()
@@ -237,6 +243,7 @@ export class CrmTools {
     args: {
       tenantId?: string;
       actorRole?: ActorRole;
+      leadId: string;
       conversationId: string;
       inboundMessageId: string;
       phone: string;
@@ -254,6 +261,7 @@ export class CrmTools {
         tenantId,
         `/api/v1/mcp/crm/conversations/${encodeURIComponent(conversationId)}/qualify-and-handoff`,
         {
+          leadId: args.leadId,
           inboundMessageId,
           phone: args.phone,
         },
