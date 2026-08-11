@@ -10,7 +10,7 @@ import {
 import { CrmTools } from './crm.tools';
 
 const TENANT = 'a'.repeat(24);
-const req = { headers: { 'x-tenant-id': TENANT } };
+const req = { user: { tenantId: TENANT } };
 
 describe('CrmTools', () => {
   let backend: { get: jest.Mock; post: jest.Mock };
@@ -50,7 +50,7 @@ describe('CrmTools', () => {
   });
 
   describe('get_conversation_context', () => {
-    it('loads schema-valid context with a trusted tenant header', async () => {
+    it('loads schema-valid context with the tenant tool argument', async () => {
       const payload = {
         conversation: {
           id: 'conversation1',
@@ -95,10 +95,7 @@ describe('CrmTools', () => {
         },
         undefined,
         {
-          headers: {
-            'x-tenant-id': TENANT,
-            'x-actor-role': 'lead_agent',
-          },
+          headers: { 'x-actor-role': 'lead_agent' },
         },
       );
 
@@ -114,7 +111,7 @@ describe('CrmTools', () => {
         '/api/v1/mcp/crm/conversations/conversation1/context',
         {
           params: { messageLimit: 25 },
-          headers: { 'x-tenant-id': TENANT },
+          headers: { 'x-tenant-id': 'b'.repeat(24) },
         },
       );
     });
@@ -302,7 +299,7 @@ describe('CrmTools', () => {
         },
         undefined,
         {
-          headers: { 'x-tenant-id': TENANT, 'x-actor-role': 'lead_agent' },
+          headers: { 'x-actor-role': 'lead_agent' },
         },
       );
 
@@ -368,6 +365,37 @@ describe('CrmTools', () => {
   });
 
   describe('qualify_and_handoff', () => {
+    it('requires the lead id supplied in agent_metadata', () => {
+      const prototype = CrmTools.prototype as unknown as Record<
+        string,
+        (...args: unknown[]) => unknown
+      >;
+      const metadata = Reflect.getMetadata(
+        'mcp:tool',
+        prototype.qualifyAndHandoff,
+      ) as {
+        parameters: {
+          safeParse: (value: unknown) => { success: boolean };
+        };
+      };
+
+      expect(
+        metadata.parameters.safeParse({
+          conversationId: 'conversation1',
+          inboundMessageId: 'message1',
+          phone: '+201012345678',
+        }).success,
+      ).toBe(false);
+      expect(
+        metadata.parameters.safeParse({
+          leadId: 'lead1',
+          conversationId: 'conversation1',
+          inboundMessageId: 'message1',
+          phone: '+201012345678',
+        }).success,
+      ).toBe(true);
+    });
+
     it('stores the phone and hands off an already-assigned lead', async () => {
       const payload = {
         id: 'lead1',
@@ -388,16 +416,14 @@ describe('CrmTools', () => {
         {
           tenantId: 'b'.repeat(24),
           actorRole: 'admin',
+          leadId: 'lead1',
           conversationId: 'conversation1',
           inboundMessageId: 'message1',
           phone: '+201012345678',
         },
         undefined,
         {
-          headers: {
-            'x-tenant-id': TENANT,
-            'x-actor-role': 'lead_agent',
-          },
+          headers: { 'x-actor-role': 'lead_agent' },
         },
       );
 
@@ -408,10 +434,11 @@ describe('CrmTools', () => {
       expect(backend.post).toHaveBeenCalledWith(
         '/api/v1/mcp/crm/conversations/conversation1/qualify-and-handoff',
         {
+          leadId: 'lead1',
           inboundMessageId: 'message1',
           phone: '+201012345678',
         },
-        { headers: { 'x-tenant-id': TENANT } },
+        { headers: { 'x-tenant-id': 'b'.repeat(24) } },
       );
     });
 
@@ -437,6 +464,7 @@ describe('CrmTools', () => {
           {
             tenantId: TENANT,
             actorRole: 'lead_agent',
+            leadId: 'lead1',
             conversationId: 'body-conversation',
             inboundMessageId: 'body-message',
             phone: '+201012345678',
@@ -447,7 +475,10 @@ describe('CrmTools', () => {
 
         expect(backend.post).toHaveBeenCalledWith(
           '/api/v1/mcp/crm/conversations/body-conversation/qualify-and-handoff',
-          expect.objectContaining({ inboundMessageId: 'body-message' }),
+          expect.objectContaining({
+            leadId: 'lead1',
+            inboundMessageId: 'body-message',
+          }),
           { headers: { 'x-tenant-id': TENANT } },
         );
       } finally {

@@ -5,8 +5,8 @@ import type { McpToolResult } from './tool-response.util';
 
 /**
  * The slice of the inbound request every tool needs to resolve its tenant.
- * `user` is populated once real auth is wired; `headers` carries the legacy
- * `x-tenant-id` transport. Shared so all namespaces stay in lockstep.
+ * `user` is populated once real auth is wired. Shared so all namespaces stay
+ * in lockstep.
  */
 export type ToolRequest = {
   headers?: Record<string, string | string[] | undefined>;
@@ -20,7 +20,7 @@ export type ToolRequest = {
 /** A tenant id is a MongoDB ObjectId — 24 hex chars. */
 const OBJECT_ID = /^[a-f\d]{24}$/i;
 
-/** Tenant may be supplied by authenticated context, a header, or tool input. */
+/** Tenant may be supplied by authenticated context or tool input. */
 export const tenantIdParam = z
   .string()
   .trim()
@@ -31,8 +31,7 @@ export const tenantIdParam = z
 /**
  * Resolve the active tenant for a tool call. Precedence:
  *   1. An authenticated `request.user`.
- *   2. The trusted `x-tenant-id` transport header.
- *   3. Explicit `tenantId` tool argument.
+ *   2. Explicit `tenantId` tool argument.
  * Returns a trimmed, non-empty id or null when no tenant context is present.
  */
 export const resolveTenantId = (
@@ -45,12 +44,6 @@ export const resolveTenantId = (
     ''
   ).trim();
   if (fromUser) return fromUser;
-
-  const headerValue = request?.headers?.['x-tenant-id'];
-  if (typeof headerValue === 'string' && headerValue.trim())
-    return headerValue.trim();
-  if (Array.isArray(headerValue) && headerValue[0]?.trim())
-    return headerValue[0].trim();
 
   const fromArgs = args?.tenantId?.trim();
   if (fromArgs) return fromArgs;
