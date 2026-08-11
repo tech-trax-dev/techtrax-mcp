@@ -21,7 +21,7 @@ describe('CrmTools', () => {
     tools = new CrmTools(backend as never);
   });
 
-  it('keeps lead reads under CRM and only handoff under Meta leads', () => {
+  it('exposes Meta lead routing tools under the Meta leads namespace', () => {
     const prototype = CrmTools.prototype as unknown as Record<
       string,
       (...args: unknown[]) => unknown
@@ -44,9 +44,9 @@ describe('CrmTools', () => {
 
     expect(toolName('listTeams')).toBe('crm.list_teams');
     expect(toolName('getTeam')).toBe('crm.get_team');
+    expect(toolName('listMetaLeadTeams')).toBe('meta_leads.list_teams');
+    expect(toolName('getMetaLeadTeam')).toBe('meta_leads.get_team');
     expect(toolName('createLead')).toBeUndefined();
-    expect(toolName('listMetaLeadTeams')).toBeUndefined();
-    expect(toolName('getMetaLeadTeam')).toBeUndefined();
   });
 
   describe('get_conversation_context', () => {
@@ -420,6 +420,8 @@ describe('CrmTools', () => {
           conversationId: 'conversation1',
           inboundMessageId: 'message1',
           phone: '+201012345678',
+          teamId: 't1',
+          isRoundRobin: true,
         },
         undefined,
         {
@@ -437,9 +439,30 @@ describe('CrmTools', () => {
           leadId: 'lead1',
           inboundMessageId: 'message1',
           phone: '+201012345678',
+          assignedTo: undefined,
+          teamId: 't1',
+          isRoundRobin: true,
         },
         { headers: { 'x-tenant-id': 'b'.repeat(24) } },
       );
+    });
+
+    it('rejects unassigned handoff attempts without an assignment target before calling backend', async () => {
+      const result = await tools.qualifyAndHandoff(
+        {
+          tenantId: TENANT,
+          actorRole: 'lead_agent',
+          leadId: 'lead1',
+          conversationId: 'conversation1',
+          inboundMessageId: 'message1',
+          phone: '+201012345678',
+        },
+        undefined,
+        req,
+      );
+
+      expect(result.isError).toBe(true);
+      expect(backend.post).not.toHaveBeenCalled();
     });
 
     it('accepts conversation context from tool arguments in production', async () => {
@@ -468,6 +491,7 @@ describe('CrmTools', () => {
             conversationId: 'body-conversation',
             inboundMessageId: 'body-message',
             phone: '+201012345678',
+            teamId: 't1',
           },
           undefined,
           undefined,
@@ -478,6 +502,8 @@ describe('CrmTools', () => {
           expect.objectContaining({
             leadId: 'lead1',
             inboundMessageId: 'body-message',
+            assignedTo: undefined,
+            teamId: 't1',
           }),
           { headers: { 'x-tenant-id': TENANT } },
         );
@@ -485,6 +511,60 @@ describe('CrmTools', () => {
         if (originalEnv === undefined) delete process.env.NODE_ENV;
         else process.env.NODE_ENV = originalEnv;
       }
+    });
+  });
+
+  describe('meta_leads team aliases', () => {
+    it('lists teams from the Meta leads namespace', async () => {
+      backend.get.mockResolvedValue({
+        teams: [
+          {
+            id: 't1',
+            name: 'Sales',
+            description: 'General sales',
+            memberCount: 2,
+            teamLeadName: 'Nora',
+            status: 'active',
+            isSystemReserved: false,
+          },
+        ],
+        pagination: { page: 1, limit: 100, total: 1, pages: 1 },
+      });
+
+      const result = await tools.listMetaLeadTeams(
+        { tenantId: TENANT, actorRole: 'lead_agent' },
+        undefined,
+        req,
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(() =>
+        TeamsListOutputSchema.parse(result.structuredContent),
+      ).not.toThrow();
+    });
+
+    it('gets a team from the Meta leads namespace', async () => {
+      backend.get.mockResolvedValue({
+        id: 't1',
+        name: 'Sales',
+        description: 'General sales',
+        status: 'active',
+        isSystemReserved: false,
+        teamLead: { id: 'u1', name: 'Nora', roleName: 'Lead' },
+        members: [],
+        memberCount: 0,
+      });
+
+      const result = await tools.getMetaLeadTeam(
+        { tenantId: TENANT, actorRole: 'lead_agent', teamId: 't1' },
+        undefined,
+        req,
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(() =>
+        TeamDetailOutputSchema.parse(result.structuredContent),
+      ).not.toThrow();
     });
   });
 });

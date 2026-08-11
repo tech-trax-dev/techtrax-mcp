@@ -54,7 +54,7 @@ const WRITE_ANNOTATIONS = {
 
 /**
  * CRM lead tools. Meta lead agents use the existing conversation lead, inspect
- * teams, assign it with crm.assign_lead, then call
+ * teams through meta_leads.list_teams/meta_leads.get_team, then call
  * meta_leads.qualify_and_handoff after collecting a phone.
  */
 @Injectable()
@@ -212,9 +212,72 @@ export class CrmTools {
   }
 
   @Tool({
+    name: 'meta_leads.list_teams',
+    description:
+      "Lists the workspace's teams so a Meta lead can be routed after the user provides a phone number. Returns each team's id, name, description, member count, team lead name, status, and reserved status. Skip the system-reserved Unassigned team, choose the best fit, then call meta_leads.get_team if member details are needed.",
+    parameters: z.object({
+      tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
+      status: z
+        .enum(['active', 'archived'])
+        .optional()
+        .describe('Filter by team status. Defaults to active.'),
+      search: z.string().min(1).optional().describe('Filter teams by name.'),
+      page: z.number().int().positive().optional(),
+      limit: z.number().int().positive().max(100).optional(),
+      format: formatSchema.optional(),
+    }),
+    outputSchema: TeamsListOutputSchema,
+    annotations: READ_ANNOTATIONS,
+  })
+  @RequireCapability('lead:read')
+  async listMetaLeadTeams(
+    args: {
+      tenantId?: string;
+      actorRole?: ActorRole;
+      status?: 'active' | 'archived';
+      search?: string;
+      page?: number;
+      limit?: number;
+      format?: OutputFormat;
+    },
+    context: unknown,
+    request?: ToolRequest,
+  ): Promise<McpToolResult> {
+    return this.listTeams(args, context, request);
+  }
+
+  @Tool({
+    name: 'meta_leads.get_team',
+    description:
+      "Returns one team's teamLead and members so a Meta lead can be assigned during meta_leads.qualify_and_handoff. Use the returned team id as teamId, or a returned user id as assignedTo.",
+    parameters: z.object({
+      tenantId: tenantIdParam,
+      actorRole: actorRoleParam,
+      teamId: z.string().min(1),
+      format: formatSchema.optional(),
+    }),
+    outputSchema: TeamDetailOutputSchema,
+    annotations: READ_ANNOTATIONS,
+  })
+  @RequireCapability('lead:read')
+  async getMetaLeadTeam(
+    args: {
+      tenantId?: string;
+      actorRole?: ActorRole;
+      teamId: string;
+      format?: OutputFormat;
+    },
+    context: unknown,
+    request?: ToolRequest,
+  ): Promise<McpToolResult> {
+    return this.getTeam(args, context, request);
+  }
+
+  @Tool({
     name: 'meta_leads.qualify_and_handoff',
     description:
-      "Updates the user's phone number after the main agent collects the user's information. Use this tool to store the phone number and start human takeover for an already-assigned lead. It does not select a team or change assignment.",
+      "Updates the user's phone number after the main agent collects it, assigns the lead, and starts human takeover. The phone must be explicitly present in the current inbound message. Do not call this before collecting the phone. Provide either assignedTo or teamId/isRoundRobin so assignment happens only after the phone is stored.",
     parameters: z.object({
       tenantId: tenantIdParam,
       actorRole: actorRoleParam,
@@ -233,6 +296,26 @@ export class CrmTools {
         .string()
         .regex(/^\+?\d{7,16}$/)
         .describe('The phone number explicitly provided by the lead.'),
+      assignedTo: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Optional specific sales user id from meta_leads.get_team. Cannot be combined with isRoundRobin.',
+        ),
+      teamId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Team id from meta_leads.list_teams. Alone assigns to the team lead; with isRoundRobin=true assigns to the least-loaded team member.',
+        ),
+      isRoundRobin: z
+        .boolean()
+        .optional()
+        .describe(
+          'Use with teamId to distribute to the least-loaded team member. Do not combine with assignedTo.',
+        ),
       format: formatSchema.optional(),
     }),
     outputSchema: LeadHandoffOutputSchema,
@@ -247,6 +330,9 @@ export class CrmTools {
       conversationId: string;
       inboundMessageId: string;
       phone: string;
+      assignedTo?: string;
+      teamId?: string;
+      isRoundRobin?: boolean;
       format?: OutputFormat;
     },
     _context: unknown,
@@ -256,6 +342,16 @@ export class CrmTools {
     if (!tenantId) return missingTenant();
     const conversationId = args.conversationId;
     const inboundMessageId = args.inboundMessageId;
+    if (!args.assignedTo && !args.teamId) {
+      return errorResult(
+        'Provide assignedTo or teamId so the lead is assigned after the phone is stored.',
+      );
+    }
+    if (args.assignedTo && args.isRoundRobin) {
+      return errorResult(
+        'assignedTo and isRoundRobin are mutually exclusive - pass a specific user, or teamId with isRoundRobin.',
+      );
+    }
     try {
       const data = await this.postWithTenantHeader<LeadHandoffOutput>(
         tenantId,
@@ -264,6 +360,9 @@ export class CrmTools {
           leadId: args.leadId,
           inboundMessageId,
           phone: args.phone,
+          assignedTo: args.assignedTo,
+          teamId: args.teamId,
+          isRoundRobin: args.isRoundRobin,
         },
       );
       const parsed = LeadHandoffOutputSchema.parse(data);
