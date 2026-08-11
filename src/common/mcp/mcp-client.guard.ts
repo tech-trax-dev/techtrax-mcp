@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   CanActivate,
   ExecutionContext,
   Injectable,
@@ -24,12 +25,19 @@ export class McpClientGuard implements CanActivate {
   constructor(private readonly config: ConfigService<Env, true>) {}
 
   canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest<Request>();
+    if (req.headers['x-tenant-id'] !== undefined) {
+      this.logger.warn('Rejected MCP client: deprecated x-tenant-id header');
+      throw new BadRequestException(
+        'x-tenant-id is not supported. Pass tenantId in the tool arguments.',
+      );
+    }
+
     const expected = this.config.get('MCP_CLIENT_API_KEY', { infer: true });
 
     // No key configured -> auth disabled (Phase 1 default).
     if (!expected) return true;
 
-    const req = context.switchToHttp().getRequest<Request>();
     const provided = req.headers['x-api-key'];
 
     if (provided !== expected) {

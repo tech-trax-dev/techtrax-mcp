@@ -4,12 +4,9 @@ const ARG_TENANT = '64b7f0000000000000000002';
 const CTX_TENANT = '64b7f0000000000000000001';
 
 describe('resolveTenantId', () => {
-  it('prefers trusted user tenant over header and tool argument', () => {
+  it('prefers trusted user tenant over the tool argument', () => {
     const resolved = resolveTenantId(
-      {
-        user: { tenantId: CTX_TENANT },
-        headers: { 'x-tenant-id': ARG_TENANT },
-      },
+      { user: { tenantId: CTX_TENANT } },
       { tenantId: ARG_TENANT },
     );
     expect(resolved).toBe(CTX_TENANT);
@@ -24,16 +21,16 @@ describe('resolveTenantId', () => {
     );
   });
 
-  it('falls back to the x-tenant-id header (string or array)', () => {
+  it('does not use the deprecated x-tenant-id header', () => {
     expect(
       resolveTenantId(
         { headers: { 'x-tenant-id': CTX_TENANT } },
         { tenantId: ARG_TENANT },
       ),
-    ).toBe(CTX_TENANT);
-    expect(resolveTenantId({ headers: { 'x-tenant-id': [CTX_TENANT] } })).toBe(
-      CTX_TENANT,
-    );
+    ).toBe(ARG_TENANT);
+    expect(
+      resolveTenantId({ headers: { 'x-tenant-id': [CTX_TENANT] } }),
+    ).toBeNull();
   });
 
   it('trims surrounding whitespace and ignores blank sources', () => {

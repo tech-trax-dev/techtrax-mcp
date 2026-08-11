@@ -10,7 +10,7 @@ import {
 import { CrmTools } from './crm.tools';
 
 const TENANT = 'a'.repeat(24);
-const req = { headers: { 'x-tenant-id': TENANT } };
+const req = { user: { tenantId: TENANT } };
 
 describe('CrmTools', () => {
   let backend: { get: jest.Mock; post: jest.Mock };
@@ -50,7 +50,7 @@ describe('CrmTools', () => {
   });
 
   describe('get_conversation_context', () => {
-    it('loads schema-valid context with a trusted tenant header', async () => {
+    it('loads schema-valid context with the tenant tool argument', async () => {
       const payload = {
         conversation: {
           id: 'conversation1',
@@ -95,10 +95,7 @@ describe('CrmTools', () => {
         },
         undefined,
         {
-          headers: {
-            'x-tenant-id': TENANT,
-            'x-actor-role': 'lead_agent',
-          },
+          headers: { 'x-actor-role': 'lead_agent' },
         },
       );
 
@@ -114,7 +111,7 @@ describe('CrmTools', () => {
         '/api/v1/mcp/crm/conversations/conversation1/context',
         {
           params: { messageLimit: 25 },
-          headers: { 'x-tenant-id': TENANT },
+          headers: { 'x-tenant-id': 'b'.repeat(24) },
         },
       );
     });
@@ -302,7 +299,7 @@ describe('CrmTools', () => {
         },
         undefined,
         {
-          headers: { 'x-tenant-id': TENANT, 'x-actor-role': 'lead_agent' },
+          headers: { 'x-actor-role': 'lead_agent' },
         },
       );
 
@@ -394,10 +391,7 @@ describe('CrmTools', () => {
         },
         undefined,
         {
-          headers: {
-            'x-tenant-id': TENANT,
-            'x-actor-role': 'lead_agent',
-          },
+          headers: { 'x-actor-role': 'lead_agent' },
         },
       );
 
@@ -411,7 +405,7 @@ describe('CrmTools', () => {
           inboundMessageId: 'message1',
           phone: '+201012345678',
         },
-        { headers: { 'x-tenant-id': TENANT } },
+        { headers: { 'x-tenant-id': 'b'.repeat(24) } },
       );
     });
 
