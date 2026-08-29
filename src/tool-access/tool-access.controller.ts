@@ -30,7 +30,9 @@ const isActorRole = (v: unknown): v is ActorRole =>
 @UseGuards(McpClientGuard)
 @Controller('tool-access')
 export class ToolAccessController {
-  constructor(private readonly toolAccess: ToolAccessService) {}
+  constructor(private readonly toolAccess: ToolAccessService) {
+    console.log('Test Tool Access Is Running By Mario');
+  }
 
   @Get()
   get(@Query('role') role?: string) {
