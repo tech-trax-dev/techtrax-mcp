@@ -1,0 +1,30 @@
+# TEST instance of the MCP server, deployed from the `test` branch.
+#
+# It runs on the SAME VM as production, so everything that could collide with
+# the prod stack is deliberately different: compose project, container name and
+# published port. Production is docker-compose.yml and is untouched by this file.
+#
+# The only *config* difference is BACKEND_BASE_URL (api.test… vs api.app…),
+# which lives in .env.test — fetched from GCP Secret Manager (mcp-test-env) by
+# CD, never committed.
+services:
+  mcp-server:
+    image: techtrax/mcp-server:${IMAGE_TAG:-latest}
+    container_name: techtrax-mcp-server-test
+    restart: unless-stopped
+    env_file:
+      - .env.test
+    # Loopback only: Caddy fronts this at https://mcp.test.tech-trax.com.
+    # Unlike prod (0.0.0.0:3100), it is not reachable on the VM's public IP.
+    ports:
+      - "127.0.0.1:3101:3100"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get('http://127.0.0.1:'+(process.env.PORT||3100)+'/healthz/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3

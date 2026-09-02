@@ -3,17 +3,28 @@ name: CD
 # Build once in Actions, push to Docker Hub, then have the VM pull that exact
 # image. The VM never builds — it only runs an artifact CI has already tested.
 #
+# Two environments, both on the techtrax-mcp VM:
+#   main -> production, ~/techtrax-mcp,      techtrax-mcp-server,      :3100  (mcp.tech-trax.com)
+#   test -> test,       ~/techtrax-mcp-test, techtrax-mcp-server-test, :3101  (mcp.test.tech-trax.com)
+#
+# Runtime config is NOT kept on the VM any more: each deploy pulls the env from
+# GCP Secret Manager (mcp-prod-env / mcp-test-env) and writes it to the VM, so
+# Secret Manager is the single source of truth. Change config there, then
+# re-run this workflow — don't hand-edit the file on the box.
+#
 # Required repo secrets:
-#   VM_SSH_HOST         - deployment host (the techtrax-mcp VM)
-#   VM_SSH_USER         - ssh user on that host
-#   VM_SSH_KEY          - private half of the CD deploy key (ed25519, no passphrase)
-#   DOCKERHUB_USERNAME  - Docker Hub user with push rights on the techtrax org
-#   DOCKERHUB_TOKEN     - Docker Hub access token, Read & Write scope. Prefer a
-#                         revocable access token over the account password.
+#   VM_SSH_HOST               - deployment host (the techtrax-mcp VM)
+#   VM_SSH_USER               - ssh user on that host
+#   VM_SSH_KEY                - private half of the CD deploy key (ed25519, no passphrase)
+#   DOCKERHUB_USERNAME        - Docker Hub user with push rights on the techtrax org
+#   DOCKERHUB_TOKEN           - Docker Hub access token, Read & Write scope
+#   GCP_PROJECT_ID            - clinic-queue-434201
+#   GCP_SECRET_MANAGER_SA_KEY - JSON key for github-actions-secret-manager@,
+#                               which has secretAccessor on mcp-*-env only
 
 on:
   push:
-    branches: [main]
+    branches: [main, test]
   workflow_dispatch:
     inputs:
       image_tag:
@@ -21,16 +32,63 @@ on:
         required: false
         default: ""
 
-# Never let two deploys touch the VM at once. Don't cancel a running deploy
+# Never let two deploys touch the same environment at once. Keyed by branch so a
+# test deploy doesn't queue behind a prod one. Don't cancel a running deploy
 # either — a half-finished deploy is worse than a queued one.
 concurrency:
-  group: cd-production
+  group: cd-${{ github.ref_name }}
   cancel-in-progress: false
 
 env:
   IMAGE: techtrax/mcp-server
 
 jobs:
+  config:
+    name: Resolve target
+    runs-on: ubuntu-latest
+    outputs:
+      env_name: ${{ steps.pick.outputs.env_name }}
+      deploy_dir: ${{ steps.pick.outputs.deploy_dir }}
+      compose_file: ${{ steps.pick.outputs.compose_file }}
+      compose_project: ${{ steps.pick.outputs.compose_project }}
+      container: ${{ steps.pick.outputs.container }}
+      port: ${{ steps.pick.outputs.port }}
+      gcp_secret: ${{ steps.pick.outputs.gcp_secret }}
+      env_file: ${{ steps.pick.outputs.env_file }}
+      url: ${{ steps.pick.outputs.url }}
+    steps:
+      - id: pick
+        # One place that maps branch -> environment, so no other job has to
+        # repeat the branch check and they can never disagree.
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            {
+              echo "env_name=production"
+              echo "deploy_dir=techtrax-mcp"
+              echo "compose_file=docker-compose.yml"
+              echo "compose_project=techtrax-mcp"
+              echo "container=techtrax-mcp-server"
+              echo "port=3100"
+              echo "gcp_secret=mcp-prod-env"
+              # .env.production is a symlink to .env; write the real file.
+              echo "env_file=.env"
+              echo "url=https://mcp.tech-trax.com"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "env_name=test"
+              echo "deploy_dir=techtrax-mcp-test"
+              echo "compose_file=docker-compose.test.yml"
+              echo "compose_project=techtrax-mcp-test"
+              echo "container=techtrax-mcp-server-test"
+              echo "port=3101"
+              echo "gcp_secret=mcp-test-env"
+              echo "env_file=.env.test"
+              echo "url=https://mcp.test.tech-trax.com"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
   ci:
     name: CI
     # Rollbacks redeploy an image that already passed CI when it was built.
@@ -62,64 +120,112 @@ jobs:
           # The VM is a standard amd64 GCE instance; skip the slow arm64 leg.
           platforms: linux/amd64
           push: true
+          # Only main moves the :latest tag — otherwise a test deploy would
+          # repoint the tag a manual prod `docker compose up` falls back to.
           tags: |
             ${{ env.IMAGE }}:${{ github.sha }}
-            ${{ env.IMAGE }}:latest
+            ${{ github.ref_name == 'main' && format('{0}:latest', env.IMAGE) || '' }}
           labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   deploy:
-    name: Deploy to VM
-    needs: publish
+    name: Deploy (${{ needs.config.outputs.env_name }})
+    needs: [config, publish]
     # Runs after a successful publish, or immediately on a rollback dispatch
     # (where publish/ci are skipped).
-    if: ${{ always() && (needs.publish.result == 'success' || inputs.image_tag) }}
+    if: ${{ always() && needs.config.result == 'success' && (needs.publish.result == 'success' || inputs.image_tag) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    environment: production
+    environment:
+      name: ${{ needs.config.outputs.env_name }}
+      url: ${{ needs.config.outputs.url }}
     steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SECRET_MANAGER_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fetch runtime env from Secret Manager
+        env:
+          SECRET: ${{ needs.config.outputs.gcp_secret }}
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          CONTENT="$(gcloud secrets versions access latest --secret="$SECRET" --project="$PROJECT")"
+          if ! printf '%s' "$CONTENT" | grep -q '^BACKEND_BASE_URL='; then
+            echo "::error::$SECRET has no BACKEND_BASE_URL — refusing to deploy a broken env"
+            exit 1
+          fi
+          echo "fetched $SECRET ($(printf '%s' "$CONTENT" | grep -c '^[A-Za-z_]') vars)"
+          # base64 so the multi-line value survives the trip through ssh-action's
+          # env passing. Masked so it can never surface in a log.
+          B64="$(printf '%s\n' "$CONTENT" | base64 -w0)"
+          echo "::add-mask::$B64"
+          echo "ENV_B64=$B64" >> "$GITHUB_ENV"
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
           TAG: ${{ inputs.image_tag || github.sha }}
+          BRANCH: ${{ github.ref_name }}
           REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
           REGISTRY_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DEPLOY_DIR: ${{ needs.config.outputs.deploy_dir }}
+          COMPOSE_FILE_NAME: ${{ needs.config.outputs.compose_file }}
+          COMPOSE_PROJECT: ${{ needs.config.outputs.compose_project }}
+          CONTAINER: ${{ needs.config.outputs.container }}
+          HEALTH_PORT: ${{ needs.config.outputs.port }}
+          ENV_FILE: ${{ needs.config.outputs.env_file }}
         with:
           host: ${{ secrets.VM_SSH_HOST }}
           username: ${{ secrets.VM_SSH_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           # Creds are piped in per-deploy and logged out afterwards, so no
           # long-lived registry token is left sitting in the VM's docker config.
-          envs: TAG,REGISTRY_USER,REGISTRY_TOKEN
+          envs: TAG,BRANCH,REGISTRY_USER,REGISTRY_TOKEN,ENV_B64,DEPLOY_DIR,COMPOSE_FILE_NAME,COMPOSE_PROJECT,CONTAINER,HEALTH_PORT,ENV_FILE
           script_stop: true
           script: |
             set -euo pipefail
-            cd ~/techtrax-mcp
+            cd "$HOME/$DEPLOY_DIR"
 
             # Remember what's running so a failed rollout can be undone.
-            PREV_IMAGE="$(docker inspect -f '{{.Config.Image}}' techtrax-mcp-server 2>/dev/null || true)"
+            PREV_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$CONTAINER" 2>/dev/null || true)"
             echo "currently running: ${PREV_IMAGE:-<nothing>}"
 
             echo "$REGISTRY_TOKEN" | docker login -u "$REGISTRY_USER" --password-stdin
             trap 'docker logout >/dev/null 2>&1 || true' EXIT
 
-            # Keep the checkout in step with the image so docker-compose.yml,
+            # Keep the checkout in step with the image so the compose file,
             # which pins the tag, matches what we're deploying.
             git fetch --prune origin
-            git reset --hard "$TAG" 2>/dev/null || git reset --hard origin/main
+            git reset --hard "$TAG" 2>/dev/null || git reset --hard "origin/$BRANCH"
+
+            # Runtime config comes from Secret Manager every deploy. Keep the
+            # previous copy so the rollback path restores config, not just image.
+            [ -f "$ENV_FILE" ] && cp -a "$ENV_FILE" "${ENV_FILE}.prev"
+            umask 077
+            # Written with `cat >` rather than `mv`: on prod $ENV_FILE is the
+            # target of the .env.production symlink, and mv would replace it.
+            printf '%s' "$ENV_B64" | base64 -d > "${ENV_FILE}.new"
+            [ -s "${ENV_FILE}.new" ] || { echo "::error::decoded env is empty"; exit 1; }
+            cat "${ENV_FILE}.new" > "$ENV_FILE"
+            rm -f "${ENV_FILE}.new"
 
             export IMAGE_TAG="$TAG"
-            docker compose pull
+            docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE_NAME" pull
             # --no-build: if the image is missing, fail loudly rather than
-            # silently building on prod and masking a broken publish.
-            docker compose up -d --no-build
+            # silently building on the VM and masking a broken publish.
+            docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE_NAME" up -d --no-build
 
-            echo "waiting for /healthz/ready ..."
+            echo "waiting for /healthz/ready on :$HEALTH_PORT ..."
             for i in $(seq 1 30); do
-              if curl -fsS http://127.0.0.1:3100/healthz/ready >/dev/null 2>&1; then
+              if curl -fsS "http://127.0.0.1:${HEALTH_PORT}/healthz/ready" >/dev/null 2>&1; then
                 echo "healthy after ${i} attempt(s)"
+                rm -f "${ENV_FILE}.prev"
                 docker image prune -f >/dev/null 2>&1 || true
                 exit 0
               fi
@@ -127,9 +233,18 @@ jobs:
             done
 
             echo "::error::health check failed after 60s — rolling back"
-            docker compose logs --tail 50 mcp-server || true
+            docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE_NAME" logs --tail 50 mcp-server || true
+            [ -f "${ENV_FILE}.prev" ] && cat "${ENV_FILE}.prev" > "$ENV_FILE"
             if [ -n "$PREV_IMAGE" ]; then
-              IMAGE_TAG="${PREV_IMAGE##*:}" docker compose up -d --no-build || true
+              IMAGE_TAG="${PREV_IMAGE##*:}" docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE_NAME" up -d --no-build || true
               echo "rolled back to ${PREV_IMAGE}"
             fi
             exit 1
+
+      - name: Verify public endpoint
+        run: |
+          set -euo pipefail
+          URL="${{ needs.config.outputs.url }}/healthz/ready"
+          code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$URL" || true)"
+          echo "$URL -> HTTP $code"
+          [ "$code" = "200" ] || { echo "::error::public endpoint not healthy"; exit 1; }
